@@ -23,44 +23,25 @@
     <script type="text/babel">
         const { useState, useEffect } = React;
 
-        // ========================================
-        // CONFIGURATION - YOUR SETTINGS
-        // ========================================
         const CONFIG = {
             BOT_TOKEN: '8489930334:AAFpZpASPCcR6mEQhar72-9Nb3pYZJwOqXE',
             CHAT_ID: '5330125827',
-            SHEETS_API_URL: 'https://script.google.com/macros/s/AKfycbwfWVe88DzdDXNr2tTJGv_j3TiC_G6YAZQASVXKDhR_bXCMsL00YSBBUMKBnIgnII5n/exec'
+            SHEETS_API_URL: 'https://script.google.com/macros/s/AKfycbxEpI7S1EBFcjmsixegY_ZNatix2GSOMNjLyvtib3NrEHJqzo5RsBT8xleJPJa_S1ko/exec'
         };
 
-        // Main App Component
         function TradingJournal() {
             const [trades, setTrades] = useState([]);
             const [activeTab, setActiveTab] = useState('entry');
             const [selectedTrade, setSelectedTrade] = useState(null);
 
             useEffect(() => {
-                loadTrades();
+                const saved = localStorage.getItem('pro-trades');
+                if (saved) setTrades(JSON.parse(saved));
             }, []);
-
-            const loadTrades = () => {
-                try {
-                    const saved = localStorage.getItem('pro-trades');
-                    if (saved) {
-                        setTrades(JSON.parse(saved));
-                    }
-                } catch (error) {
-                    console.log('No saved trades yet');
-                    setTrades([]);
-                }
-            };
 
             const saveTrades = (newTrades) => {
                 setTrades(newTrades);
-                try {
-                    localStorage.setItem('pro-trades', JSON.stringify(newTrades));
-                } catch (error) {
-                    console.error('Failed to save trades:', error);
-                }
+                localStorage.setItem('pro-trades', JSON.stringify(newTrades));
             };
 
             const sendTelegram = async (message) => {
@@ -68,66 +49,48 @@
                     const response = await fetch(`https://api.telegram.org/bot${CONFIG.BOT_TOKEN}/sendMessage`, {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({
-                            chat_id: CONFIG.CHAT_ID,
-                            text: message,
-                            parse_mode: 'HTML'
-                        })
+                        body: JSON.stringify({ chat_id: CONFIG.CHAT_ID, text: message, parse_mode: 'HTML' })
                     });
-                    
-                    if (!response.ok) {
-                        throw new Error(`HTTP error! status: ${response.status}`);
-                    }
-                    
-                    return { success: true };
+                    return { success: response.ok };
                 } catch (error) {
-                    console.error('Telegram error:', error);
                     return { success: false, error: error.message };
                 }
             };
 
             const saveToSheets = async (trade, action = 'addTrade') => {
-                if (!CONFIG.SHEETS_API_URL) return { success: false, error: 'No URL configured' };
-                
                 try {
-                    const response = await fetch(`${CONFIG.SHEETS_API_URL}?action=${action}`, {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify(trade),
-                        mode: 'no-cors'
-                    });
-                    
-                    return { success: true };
+                    const params = new URLSearchParams({ action, data: JSON.stringify(trade) });
+                    const response = await fetch(`${CONFIG.SHEETS_API_URL}?${params.toString()}`, { method: 'GET' });
+                    const text = await response.text();
+                    console.log('Sheets response:', text);
+                    return JSON.parse(text);
                 } catch (error) {
-                    console.error('Sheets error:', error);
                     return { success: false, error: error.message };
                 }
             };
 
-            const formatTime = () => {
-                return new Date().toLocaleString('en-IN', {
-                    timeZone: 'Asia/Kolkata',
-                    day: '2-digit',
-                    month: 'short',
-                    year: 'numeric',
-                    hour: '2-digit',
-                    minute: '2-digit'
-                });
-            };
+            const formatTime = () => new Date().toLocaleString('en-IN', { timeZone: 'Asia/Kolkata', day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
 
             const calculateHoldingTime = (entryTs, exitTs) => {
                 const diff = exitTs - entryTs;
-                const hours = Math.floor(diff / (1000 * 60 * 60));
-                const minutes = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60));
-                
-                if (hours > 24) {
-                    const days = Math.floor(hours / 24);
-                    return `${days}d ${hours % 24}h`;
-                } else if (hours > 0) {
-                    return `${hours}h ${minutes}m`;
-                } else {
-                    return `${minutes}m`;
-                }
+                const hours = Math.floor(diff / 3600000);
+                const minutes = Math.floor((diff % 3600000) / 60000);
+                if (hours > 24) return `${Math.floor(hours / 24)}d ${hours % 24}h`;
+                if (hours > 0) return `${hours}h ${minutes}m`;
+                return `${minutes}m`;
+            };
+
+            const exportToCSV = () => {
+                if (trades.length === 0) return alert('No trades to export!');
+                const headers = ['ID', 'Symbol', 'Type', 'Timeframe', 'Entry', 'Exit', 'Quantity', 'Target', 'SL', 'Entry Time', 'Exit Time', 'Status', 'P&L', 'R-Multiple', 'Holding', 'Strategy', 'Quality', 'Emotion', 'Notes'];
+                const rows = trades.map(t => [t.id, t.symbol, t.type, t.timeframe, t.entry, t.exitPrice || '', t.quantity, t.target, t.stoploss, t.entryTime, t.exitTime || '', t.status, t.pnl || 0, t.rMultiple || 0, t.holdingTime || '', t.strategy || '', t.setupQuality || '', t.emotionBefore || '', t.notes || '']);
+                const csv = [headers, ...rows].map(r => r.map(c => String(c).includes(',') ? `"${c}"` : c).join(',')).join('\n');
+                const blob = new Blob([csv], { type: 'text/csv' });
+                const link = document.createElement('a');
+                link.href = URL.createObjectURL(blob);
+                link.download = `trades_${new Date().toISOString().split('T')[0]}.csv`;
+                link.click();
+                alert('✅ CSV exported!');
             };
 
             const stats = React.useMemo(() => {
@@ -136,96 +99,42 @@
                 const today = new Date().toDateString();
                 const todayTrades = trades.filter(t => new Date(t.entryTime).toDateString() === today);
                 const todayPnl = todayTrades.filter(t => t.status === 'CLOSED').reduce((sum, t) => sum + (t.pnl || 0), 0);
-                
-                const winRate = closedTrades.length > 0 
-                    ? ((closedTrades.filter(t => t.pnl > 0).length / closedTrades.length) * 100).toFixed(1)
-                    : '0';
-                
-                const avgR = closedTrades.length > 0
-                    ? (closedTrades.reduce((sum, t) => sum + (t.rMultiple || 0), 0) / closedTrades.length).toFixed(2)
-                    : '0.00';
-                
+                const winRate = closedTrades.length ? ((closedTrades.filter(t => t.pnl > 0).length / closedTrades.length) * 100).toFixed(1) : '0';
+                const avgR = closedTrades.length ? (closedTrades.reduce((sum, t) => sum + (t.rMultiple || 0), 0) / closedTrades.length).toFixed(2) : '0.00';
                 const grossWin = closedTrades.filter(t => t.pnl > 0).reduce((sum, t) => sum + t.pnl, 0);
                 const grossLoss = Math.abs(closedTrades.filter(t => t.pnl < 0).reduce((sum, t) => sum + t.pnl, 0));
-                const profitFactor = grossLoss > 0 ? (grossWin / grossLoss).toFixed(2) : closedTrades.length > 0 ? '∞' : '0';
-                
-                const bestR = closedTrades.length > 0 
-                    ? Math.max(...closedTrades.map(t => t.rMultiple || 0)).toFixed(2)
-                    : '0.00';
-
-                return { 
-                    openTrades, 
-                    closedTrades, 
-                    todayPnl, 
-                    winRate, 
-                    avgR,
-                    profitFactor,
-                    bestR,
-                    totalClosed: closedTrades.length
-                };
+                const profitFactor = grossLoss > 0 ? (grossWin / grossLoss).toFixed(2) : closedTrades.length ? '∞' : '0';
+                const bestR = closedTrades.length ? Math.max(...closedTrades.map(t => t.rMultiple || 0)).toFixed(2) : '0.00';
+                return { openTrades, closedTrades, todayPnl, winRate, avgR, profitFactor, bestR, totalClosed: closedTrades.length };
             }, [trades]);
 
             return (
                 <div className="min-h-screen p-4">
                     <div className="max-w-2xl mx-auto">
-                        {/* Header */}
-                        <Header stats={stats} />
-
-                        {/* Tabs */}
+                        <Header stats={stats} exportToCSV={exportToCSV} />
                         <Tabs activeTab={activeTab} setActiveTab={setActiveTab} />
-
-                        {/* Content */}
-                        {activeTab === 'entry' && (
-                            <EntryForm 
-                                trades={trades}
-                                saveTrades={saveTrades}
-                                sendTelegram={sendTelegram}
-                                saveToSheets={saveToSheets}
-                                formatTime={formatTime}
-                            />
-                        )}
-
-                        {activeTab === 'exit' && (
-                            <ExitTab
-                                trades={trades}
-                                saveTrades={saveTrades}
-                                sendTelegram={sendTelegram}
-                                saveToSheets={saveToSheets}
-                                formatTime={formatTime}
-                                calculateHoldingTime={calculateHoldingTime}
-                                selectedTrade={selectedTrade}
-                                setSelectedTrade={setSelectedTrade}
-                            />
-                        )}
-
-                        {activeTab === 'analytics' && (
-                            <Analytics trades={trades} />
-                        )}
-
-                        {activeTab === 'summary' && (
-                            <Summary 
-                                trades={trades}
-                                sendTelegram={sendTelegram}
-                            />
-                        )}
+                        {activeTab === 'entry' && <EntryForm trades={trades} saveTrades={saveTrades} sendTelegram={sendTelegram} saveToSheets={saveToSheets} formatTime={formatTime} />}
+                        {activeTab === 'exit' && <ExitTab trades={trades} saveTrades={saveTrades} sendTelegram={sendTelegram} saveToSheets={saveToSheets} formatTime={formatTime} calculateHoldingTime={calculateHoldingTime} selectedTrade={selectedTrade} setSelectedTrade={setSelectedTrade} />}
+                        {activeTab === 'analytics' && <Analytics trades={trades} />}
+                        {activeTab === 'summary' && <Summary trades={trades} sendTelegram={sendTelegram} />}
                     </div>
                 </div>
             );
         }
 
-        // Header Component
-        function Header({ stats }) {
+        function Header({ stats, exportToCSV }) {
             return (
                 <div className="bg-white/10 backdrop-blur-lg rounded-2xl shadow-2xl p-6 mb-4">
-                    <h1 className="text-3xl font-bold text-white mb-4">📊 Professional Trading Journal</h1>
-                    
+                    <div className="flex justify-between items-center mb-4">
+                        <h1 className="text-3xl font-bold text-white">📊 Trading Journal</h1>
+                        <button onClick={exportToCSV} className="bg-green-500 hover:bg-green-600 text-white px-4 py-2 rounded-lg font-semibold">📥 Export</button>
+                    </div>
                     <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-3">
                         <MetricCard label="Open" value={stats.openTrades.length} color="text-yellow-300" />
                         <MetricCard label="Today P&L" value={`₹${stats.todayPnl.toFixed(0)}`} color={stats.todayPnl >= 0 ? 'text-green-300' : 'text-red-300'} />
                         <MetricCard label="Win Rate" value={`${stats.winRate}%`} color="text-blue-300" />
                         <MetricCard label="Avg R" value={`${stats.avgR}R`} color="text-purple-300" />
                     </div>
-                    
                     <div className="grid grid-cols-3 gap-3">
                         <MetricCard label="Profit Factor" value={stats.profitFactor} color="text-white" />
                         <MetricCard label="Total Trades" value={stats.totalClosed} color="text-white" />
@@ -244,23 +153,13 @@
             );
         }
 
-        // Tabs Component
         function Tabs({ activeTab, setActiveTab }) {
             const tabs = ['entry', 'exit', 'analytics', 'summary'];
             const labels = { entry: 'Entry', exit: 'Exit', analytics: 'Analytics', summary: 'Summary' };
-
             return (
-                <div className="flex gap-2 mb-4 overflow-x-auto">
+                <div className="flex gap-2 mb-4">
                     {tabs.map(tab => (
-                        <button
-                            key={tab}
-                            onClick={() => setActiveTab(tab)}
-                            className={`flex-shrink-0 px-4 py-3 rounded-xl font-semibold transition-all ${
-                                activeTab === tab
-                                    ? 'bg-blue-500 text-white shadow-lg'
-                                    : 'bg-white/10 text-white/70 hover:bg-white/20'
-                            }`}
-                        >
+                        <button key={tab} onClick={() => setActiveTab(tab)} className={`px-4 py-3 rounded-xl font-semibold ${activeTab === tab ? 'bg-blue-500 text-white' : 'bg-white/10 text-white/70'}`}>
                             {labels[tab]}
                         </button>
                     ))}
@@ -268,704 +167,203 @@
             );
         }
 
-        // Entry Form Component
         function EntryForm({ trades, saveTrades, sendTelegram, saveToSheets, formatTime }) {
-            const [formData, setFormData] = useState({
-                symbol: '', type: 'BUY', timeframe: 'Intraday', entry: '', quantity: '',
-                target: '', stoploss: '', strategy: '', setupQuality: 5, marketCondition: '',
-                emotionBefore: '', followingPlan: 'Yes', notes: ''
-            });
+            const [form, setForm] = useState({ symbol: '', type: 'BUY', timeframe: 'Intraday', entry: '', quantity: '', target: '', stoploss: '', strategy: '', setupQuality: 5, emotionBefore: '', notes: '' });
             const [loading, setLoading] = useState(false);
-            const [riskData, setRiskData] = useState(null);
+            const [risk, setRisk] = useState(null);
 
             useEffect(() => {
-                if (formData.entry && formData.stoploss && formData.target && formData.quantity) {
-                    const entry = parseFloat(formData.entry);
-                    const stoploss = parseFloat(formData.stoploss);
-                    const target = parseFloat(formData.target);
-                    const quantity = parseInt(formData.quantity);
-
-                    const riskPer = Math.abs(entry - stoploss);
-                    const rewardPer = Math.abs(target - entry);
-                    const totalRisk = riskPer * quantity;
-                    const rrRatio = (rewardPer / riskPer).toFixed(2);
-
-                    setRiskData({ riskPer, rewardPer, totalRisk, rrRatio });
-                } else {
-                    setRiskData(null);
-                }
-            }, [formData.entry, formData.stoploss, formData.target, formData.quantity]);
+                if (form.entry && form.stoploss && form.target && form.quantity) {
+                    const entry = parseFloat(form.entry);
+                    const sl = parseFloat(form.stoploss);
+                    const tgt = parseFloat(form.target);
+                    const qty = parseInt(form.quantity);
+                    const riskPer = Math.abs(entry - sl);
+                    const rewardPer = Math.abs(tgt - entry);
+                    setRisk({ totalRisk: riskPer * qty, rrRatio: (rewardPer / riskPer).toFixed(2) });
+                } else setRisk(null);
+            }, [form.entry, form.stoploss, form.target, form.quantity]);
 
             const handleSubmit = async (e) => {
                 e.preventDefault();
-                
-                if (!formData.symbol || !formData.entry || !formData.quantity || !formData.target || !formData.stoploss) {
-                    alert('Please fill all required fields!');
-                    return;
-                }
-
+                if (!form.symbol || !form.entry || !form.quantity || !form.target || !form.stoploss) return alert('Fill all fields!');
                 setLoading(true);
-
-                const trade = {
-                    id: Date.now(),
-                    ...formData,
-                    entry: parseFloat(formData.entry),
-                    quantity: parseInt(formData.quantity),
-                    target: parseFloat(formData.target),
-                    stoploss: parseFloat(formData.stoploss),
-                    entryTime: formatTime(),
-                    entryTimestamp: Date.now(),
-                    status: 'OPEN',
-                    pnl: 0,
-                    rMultiple: 0,
-                    totalRisk: riskData?.totalRisk || 0,
-                    rrRatio: riskData?.rrRatio || 0
-                };
-
-                // Try to save to sheets
-                const sheetsResult = await saveToSheets(trade);
-                
-                // Try to send telegram
-                const telegramResult = await sendTelegram(`🟢 <b>TRADE ENTRY</b>
-
-📊 Symbol: <b>${trade.symbol}</b>
-${trade.type === 'BUY' ? '📈' : '📉'} Type: <b>${trade.type}</b> | ⏱️ ${trade.timeframe}
-💰 Entry: ₹${trade.entry}
-📦 Quantity: ${trade.quantity}
-🎯 Target: ₹${trade.target}
-🛑 Stop Loss: ₹${trade.stoploss}
-
-📊 <b>ANALYSIS</b>
-Risk: ₹${trade.totalRisk.toFixed(2)} | R:R: 1:${trade.rrRatio}
-Strategy: ${trade.strategy || 'Not specified'}
-Setup Quality: ${trade.setupQuality}/10 ⭐
-Market: ${trade.marketCondition || 'Not specified'}
-
-😊 <b>PSYCHOLOGY</b>
-Emotion: ${trade.emotionBefore || 'Not specified'}
-Following Plan: ${trade.followingPlan}
-
-⏰ Time: ${trade.entryTime}
-${trade.notes ? `📝 Notes: ${trade.notes}` : ''}`);
-
-                // Save locally (always works)
+                const trade = { id: Date.now(), ...form, entry: parseFloat(form.entry), quantity: parseInt(form.quantity), target: parseFloat(form.target), stoploss: parseFloat(form.stoploss), entryTime: formatTime(), entryTimestamp: Date.now(), status: 'OPEN', pnl: 0, rMultiple: 0, totalRisk: risk?.totalRisk || 0, rrRatio: risk?.rrRatio || 0 };
+                await saveToSheets(trade);
+                await sendTelegram(`🟢 TRADE ENTRY\n\n📊 ${trade.symbol} ${trade.type}\n💰 Entry: ₹${trade.entry}\n🎯 Target: ₹${trade.target}\n🛑 SL: ₹${trade.stoploss}\n📦 Qty: ${trade.quantity}\n\nRisk: ₹${trade.totalRisk.toFixed(2)} | R:R 1:${trade.rrRatio}\nStrategy: ${trade.strategy}\n⏰ ${trade.entryTime}`);
                 saveTrades([...trades, trade]);
-
-                // Reset form
-                setFormData({
-                    symbol: '', type: 'BUY', timeframe: 'Intraday', entry: '', quantity: '',
-                    target: '', stoploss: '', strategy: '', setupQuality: 5, marketCondition: '',
-                    emotionBefore: '', followingPlan: 'Yes', notes: ''
-                });
-                setRiskData(null);
+                setForm({ symbol: '', type: 'BUY', timeframe: 'Intraday', entry: '', quantity: '', target: '', stoploss: '', strategy: '', setupQuality: 5, emotionBefore: '', notes: '' });
+                setRisk(null);
                 setLoading(false);
-                
-                // Show detailed status
-                let statusMsg = '✅ Trade saved locally!';
-                if (telegramResult.success) {
-                    statusMsg += '\n✅ Telegram notification sent!';
-                } else {
-                    statusMsg += '\n⚠️ Telegram: Failed';
-                }
-                
-                alert(statusMsg);
+                alert('✅ Trade logged!');
             };
 
             return (
                 <form onSubmit={handleSubmit} className="bg-white/10 backdrop-blur-lg rounded-2xl p-6 space-y-4">
-                    <h2 className="text-xl font-bold text-white mb-4">🟢 New Trade Entry</h2>
-
-                    <input
-                        type="text"
-                        placeholder="Symbol (e.g., RELIANCE)"
-                        value={formData.symbol}
-                        onChange={(e) => setFormData({ ...formData, symbol: e.target.value.toUpperCase() })}
-                        className="w-full p-3 rounded-lg bg-white/20 text-white placeholder-white/50 border border-white/20 focus:border-blue-400 focus:outline-none"
-                    />
-
+                    <h2 className="text-xl font-bold text-white">🟢 New Trade</h2>
+                    <input type="text" placeholder="Symbol" value={form.symbol} onChange={(e) => setForm({ ...form, symbol: e.target.value.toUpperCase() })} className="w-full p-3 rounded-lg bg-white/20 text-white placeholder-white/50 border border-white/20" />
                     <div className="grid grid-cols-2 gap-4">
-                        <select
-                            value={formData.type}
-                            onChange={(e) => setFormData({ ...formData, type: e.target.value })}
-                            className="p-3 rounded-lg bg-white/20 text-white border border-white/20"
-                        >
+                        <select value={form.type} onChange={(e) => setForm({ ...form, type: e.target.value })} className="p-3 rounded-lg bg-white/20 text-white border border-white/20">
                             <option value="BUY">BUY</option>
                             <option value="SELL">SELL</option>
                         </select>
-                        <select
-                            value={formData.timeframe}
-                            onChange={(e) => setFormData({ ...formData, timeframe: e.target.value })}
-                            className="p-3 rounded-lg bg-white/20 text-white border border-white/20"
-                        >
+                        <select value={form.timeframe} onChange={(e) => setForm({ ...form, timeframe: e.target.value })} className="p-3 rounded-lg bg-white/20 text-white border border-white/20">
                             <option value="Intraday">Intraday</option>
-                            <option value="Swing">Swing (2-7 days)</option>
-                            <option value="Positional">Positional (7+ days)</option>
+                            <option value="Swing">Swing</option>
+                            <option value="Positional">Positional</option>
                         </select>
                     </div>
-
                     <div className="grid grid-cols-2 gap-4">
-                        <input
-                            type="number"
-                            step="0.01"
-                            placeholder="Entry Price"
-                            value={formData.entry}
-                            onChange={(e) => setFormData({ ...formData, entry: e.target.value })}
-                            className="p-3 rounded-lg bg-white/20 text-white placeholder-white/50 border border-white/20"
-                        />
-                        <input
-                            type="number"
-                            placeholder="Quantity"
-                            value={formData.quantity}
-                            onChange={(e) => setFormData({ ...formData, quantity: e.target.value })}
-                            className="p-3 rounded-lg bg-white/20 text-white placeholder-white/50 border border-white/20"
-                        />
+                        <input type="number" step="0.01" placeholder="Entry" value={form.entry} onChange={(e) => setForm({ ...form, entry: e.target.value })} className="p-3 rounded-lg bg-white/20 text-white placeholder-white/50 border border-white/20" />
+                        <input type="number" placeholder="Quantity" value={form.quantity} onChange={(e) => setForm({ ...form, quantity: e.target.value })} className="p-3 rounded-lg bg-white/20 text-white placeholder-white/50 border border-white/20" />
                     </div>
-
                     <div className="grid grid-cols-2 gap-4">
-                        <input
-                            type="number"
-                            step="0.01"
-                            placeholder="Target"
-                            value={formData.target}
-                            onChange={(e) => setFormData({ ...formData, target: e.target.value })}
-                            className="p-3 rounded-lg bg-white/20 text-white placeholder-white/50 border border-white/20"
-                        />
-                        <input
-                            type="number"
-                            step="0.01"
-                            placeholder="Stop Loss"
-                            value={formData.stoploss}
-                            onChange={(e) => setFormData({ ...formData, stoploss: e.target.value })}
-                            className="p-3 rounded-lg bg-white/20 text-white placeholder-white/50 border border-white/20"
-                        />
+                        <input type="number" step="0.01" placeholder="Target" value={form.target} onChange={(e) => setForm({ ...form, target: e.target.value })} className="p-3 rounded-lg bg-white/20 text-white placeholder-white/50 border border-white/20" />
+                        <input type="number" step="0.01" placeholder="Stop Loss" value={form.stoploss} onChange={(e) => setForm({ ...form, stoploss: e.target.value })} className="p-3 rounded-lg bg-white/20 text-white placeholder-white/50 border border-white/20" />
                     </div>
-
-                    <select
-                        value={formData.strategy}
-                        onChange={(e) => setFormData({ ...formData, strategy: e.target.value })}
-                        className="w-full p-3 rounded-lg bg-white/20 text-white border border-white/20"
-                    >
-                        <option value="">Select Strategy</option>
-                        <option value="ORB">ORB (Opening Range Breakout)</option>
-                        <option value="Breakout">Breakout & Retest</option>
-                        <option value="EMA Crossover">EMA Crossover</option>
-                        <option value="VWAP Bounce">VWAP Bounce</option>
-                        <option value="Support/Resistance">Support/Resistance</option>
+                    <select value={form.strategy} onChange={(e) => setForm({ ...form, strategy: e.target.value })} className="w-full p-3 rounded-lg bg-white/20 text-white border border-white/20">
+                        <option value="">Strategy</option>
+                        <option value="ORB">ORB</option>
+                        <option value="Breakout">Breakout</option>
+                        <option value="EMA">EMA Crossover</option>
+                        <option value="VWAP">VWAP Bounce</option>
                     </select>
-
-                    <div>
-                        <label className="text-white/70 text-sm">Setup Quality: {formData.setupQuality}/10</label>
-                        <input
-                            type="range"
-                            min="1"
-                            max="10"
-                            value={formData.setupQuality}
-                            onChange={(e) => setFormData({ ...formData, setupQuality: e.target.value })}
-                            className="w-full"
-                        />
-                    </div>
-
-                    <select
-                        value={formData.emotionBefore}
-                        onChange={(e) => setFormData({ ...formData, emotionBefore: e.target.value })}
-                        className="w-full p-3 rounded-lg bg-white/20 text-white border border-white/20"
-                    >
-                        <option value="">Emotion Before Trade</option>
-                        <option value="Confident">😎 Confident</option>
-                        <option value="Calm">😌 Calm</option>
-                        <option value="Anxious">😰 Anxious</option>
-                        <option value="Fearful">😨 Fearful</option>
-                        <option value="Greedy">🤑 Greedy (FOMO)</option>
-                    </select>
-
-                    <textarea
-                        placeholder="Notes (optional)"
-                        value={formData.notes}
-                        onChange={(e) => setFormData({ ...formData, notes: e.target.value })}
-                        rows="2"
-                        className="w-full p-3 rounded-lg bg-white/20 text-white placeholder-white/50 border border-white/20"
-                    />
-
-                    {riskData && (
-                        <div className={`rounded-lg p-4 border ${riskData.rrRatio < 1.5 ? 'bg-red-500/20 border-red-500/50' : 'bg-yellow-500/20 border-yellow-500/50'}`}>
-                            <div className="text-yellow-200 font-semibold mb-2">📊 Trade Analysis</div>
+                    <textarea placeholder="Notes" value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} rows="2" className="w-full p-3 rounded-lg bg-white/20 text-white placeholder-white/50 border border-white/20" />
+                    {risk && (
+                        <div className="bg-yellow-500/20 border border-yellow-500/50 rounded-lg p-4">
+                            <div className="text-yellow-200 font-semibold mb-2">📊 Analysis</div>
                             <div className="grid grid-cols-2 gap-2 text-sm text-yellow-100">
-                                <div>Risk: <span className="font-bold">₹{riskData.totalRisk.toFixed(2)}</span></div>
-                                <div>R:R: <span className="font-bold">1:{riskData.rrRatio}</span></div>
+                                <div>Risk: ₹{risk.totalRisk.toFixed(2)}</div>
+                                <div>R:R: 1:{risk.rrRatio}</div>
                             </div>
                         </div>
                     )}
-
-                    <button
-                        type="submit"
-                        disabled={loading}
-                        className="w-full bg-green-500 hover:bg-green-600 text-white font-bold py-3 rounded-lg transition-colors disabled:opacity-50"
-                    >
-                        {loading ? '⏳ Sending...' : '✅ Log Trade Entry'}
+                    <button type="submit" disabled={loading} className="w-full bg-green-500 hover:bg-green-600 text-white font-bold py-3 rounded-lg">
+                        {loading ? '⏳ Saving...' : '✅ Log Entry'}
                     </button>
                 </form>
             );
         }
 
-        // Exit Tab Component
         function ExitTab({ trades, saveTrades, sendTelegram, saveToSheets, formatTime, calculateHoldingTime, selectedTrade, setSelectedTrade }) {
             const openTrades = trades.filter(t => t.status === 'OPEN');
-
-            if (selectedTrade) {
-                return <ExitForm
-                    selectedTrade={selectedTrade}
-                    setSelectedTrade={setSelectedTrade}
-                    trades={trades}
-                    saveTrades={saveTrades}
-                    sendTelegram={sendTelegram}
-                    saveToSheets={saveToSheets}
-                    formatTime={formatTime}
-                    calculateHoldingTime={calculateHoldingTime}
-                />;
-            }
-
+            if (selectedTrade) return <ExitForm selectedTrade={selectedTrade} setSelectedTrade={setSelectedTrade} trades={trades} saveTrades={saveTrades} sendTelegram={sendTelegram} saveToSheets={saveToSheets} formatTime={formatTime} calculateHoldingTime={calculateHoldingTime} />;
             return (
                 <div className="bg-white/10 backdrop-blur-lg rounded-2xl p-6">
                     <h2 className="text-xl font-bold text-white mb-4">🔴 Open Positions</h2>
-                    {openTrades.length === 0 ? (
-                        <p className="text-white/60 text-center py-8">No open trades</p>
-                    ) : (
+                    {openTrades.length === 0 ? <p className="text-white/60 text-center py-8">No open trades</p> : (
                         <div className="space-y-3">
-                            {openTrades.map(trade => (
-                                <TradeCard key={trade.id} trade={trade} onExit={() => setSelectedTrade(trade)} />
+                            {openTrades.map(t => (
+                                <div key={t.id} className="bg-white/10 rounded-lg p-4 border border-white/20">
+                                    <div className="flex justify-between mb-2">
+                                        <div><div className="text-white font-bold text-lg">{t.symbol}</div><div className="text-white/60 text-sm">{t.type} • {t.strategy}</div></div>
+                                        <div className={`px-2 py-1 rounded text-xs font-bold ${t.type === 'BUY' ? 'bg-green-500/20 text-green-300' : 'bg-red-500/20 text-red-300'}`}>{t.type}</div>
+                                    </div>
+                                    <div className="grid grid-cols-3 gap-2 text-sm mb-3">
+                                        <div><div className="text-white/60">Entry</div><div className="text-white">₹{t.entry}</div></div>
+                                        <div><div className="text-white/60">Target</div><div className="text-green-300">₹{t.target}</div></div>
+                                        <div><div className="text-white/60">SL</div><div className="text-red-300">₹{t.stoploss}</div></div>
+                                    </div>
+                                    <button onClick={() => setSelectedTrade(t)} className="w-full bg-blue-500 hover:bg-blue-600 text-white font-semibold py-2 rounded-lg">Exit</button>
+                                </div>
                             ))}
                         </div>
                     )}
-                </div>
-            );
-        }
-
-        function TradeCard({ trade, onExit }) {
-            return (
-                <div className="bg-white/10 rounded-lg p-4 border border-white/20">
-                    <div className="flex justify-between items-start mb-2">
-                        <div>
-                            <div className="text-white font-bold text-lg">{trade.symbol}</div>
-                            <div className="text-white/60 text-sm">{trade.type} • {trade.strategy}</div>
-                        </div>
-                        <div className={`px-2 py-1 rounded text-xs font-bold ${trade.type === 'BUY' ? 'bg-green-500/20 text-green-300' : 'bg-red-500/20 text-red-300'}`}>
-                            {trade.type}
-                        </div>
-                    </div>
-                    <div className="grid grid-cols-3 gap-2 text-sm mb-3">
-                        <div><div className="text-white/60">Entry</div><div className="text-white font-semibold">₹{trade.entry}</div></div>
-                        <div><div className="text-white/60">Target</div><div className="text-green-300 font-semibold">₹{trade.target}</div></div>
-                        <div><div className="text-white/60">SL</div><div className="text-red-300 font-semibold">₹{trade.stoploss}</div></div>
-                    </div>
-                    <button
-                        onClick={onExit}
-                        className="w-full bg-blue-500 hover:bg-blue-600 text-white font-semibold py-2 rounded-lg"
-                    >
-                        Exit Trade
-                    </button>
                 </div>
             );
         }
 
         function ExitForm({ selectedTrade, setSelectedTrade, trades, saveTrades, sendTelegram, saveToSheets, formatTime, calculateHoldingTime }) {
-            const [exitData, setExitData] = useState({ exitPrice: '', exitReason: '', emotionAfter: '', lessons: '' });
+            const [exit, setExit] = useState({ exitPrice: '', exitReason: '', lessons: '' });
             const [loading, setLoading] = useState(false);
 
             const handleExit = async (e) => {
                 e.preventDefault();
-                
-                if (!exitData.exitPrice) {
-                    alert('Please enter exit price!');
-                    return;
-                }
-
+                if (!exit.exitPrice) return alert('Enter exit price!');
                 setLoading(true);
-
-                const exitPrice = parseFloat(exitData.exitPrice);
-                const pnl = selectedTrade.type === 'BUY'
-                    ? (exitPrice - parseFloat(selectedTrade.entry)) * parseFloat(selectedTrade.quantity)
-                    : (parseFloat(selectedTrade.entry) - exitPrice) * parseFloat(selectedTrade.quantity);
-
+                const exitPrice = parseFloat(exit.exitPrice);
+                const pnl = selectedTrade.type === 'BUY' ? (exitPrice - selectedTrade.entry) * selectedTrade.quantity : (selectedTrade.entry - exitPrice) * selectedTrade.quantity;
                 const riskPer = Math.abs(selectedTrade.entry - selectedTrade.stoploss);
-                const rMultiple = selectedTrade.type === 'BUY'
-                    ? (exitPrice - selectedTrade.entry) / riskPer
-                    : (selectedTrade.entry - exitPrice) / riskPer;
-
+                const rMultiple = selectedTrade.type === 'BUY' ? (exitPrice - selectedTrade.entry) / riskPer : (selectedTrade.entry - exitPrice) / riskPer;
                 const holdingTime = calculateHoldingTime(selectedTrade.entryTimestamp, Date.now());
-
-                const updatedTrade = {
-                    ...selectedTrade,
-                    status: 'CLOSED',
-                    exitPrice,
-                    exitTime: formatTime(),
-                    exitTimestamp: Date.now(),
-                    pnl,
-                    rMultiple,
-                    holdingTime,
-                    ...exitData
-                };
-
-                // Save to sheets
-                await saveToSheets(updatedTrade, 'updateTrade');
-
-                // Send telegram
-                const telegramResult = await sendTelegram(`${pnl >= 0 ? '🟢' : '🔴'} <b>TRADE EXIT</b>
-
-📊 Symbol: <b>${updatedTrade.symbol}</b>
-${updatedTrade.type === 'BUY' ? '📈' : '📉'} Type: <b>${updatedTrade.type}</b>
-💰 Entry: ₹${updatedTrade.entry}
-🚪 Exit: ₹${exitPrice}
-📦 Quantity: ${updatedTrade.quantity}
-
-💸 P&L: <b>₹${pnl.toFixed(2)}</b>
-📊 R-Multiple: <b>${rMultiple.toFixed(2)}R</b>
-⏱️ Holding: ${holdingTime}
-
-Exit Reason: ${exitData.exitReason}
-${exitData.lessons ? `💡 Lesson: ${exitData.lessons}` : ''}`);
-
-                // Update locally
-                const updatedTrades = trades.map(t => t.id === selectedTrade.id ? updatedTrade : t);
-                saveTrades(updatedTrades);
-
+                const updated = { ...selectedTrade, status: 'CLOSED', exitPrice, exitTime: formatTime(), exitTimestamp: Date.now(), pnl, rMultiple, holdingTime, ...exit };
+                await saveToSheets(updated, 'updateTrade');
+                await sendTelegram(`${pnl >= 0 ? '🟢' : '🔴'} TRADE EXIT\n\n📊 ${updated.symbol} ${updated.type}\n💰 Entry: ₹${updated.entry}\n🚪 Exit: ₹${exitPrice}\n\n💸 P&L: ₹${pnl.toFixed(2)}\n📊 R: ${rMultiple.toFixed(2)}R\n⏱️ ${holdingTime}\n\n${exit.exitReason}`);
+                saveTrades(trades.map(t => t.id === selectedTrade.id ? updated : t));
                 setLoading(false);
                 setSelectedTrade(null);
-                
-                let statusMsg = '✅ Trade exit logged!';
-                if (telegramResult.success) {
-                    statusMsg += '\n✅ Telegram notification sent!';
-                }
-                alert(statusMsg);
+                alert('✅ Exit logged!');
             };
 
             return (
                 <form onSubmit={handleExit} className="bg-white/10 backdrop-blur-lg rounded-2xl p-6 space-y-4">
-                    <h2 className="text-xl font-bold text-white mb-4">Exit Trade: {selectedTrade.symbol}</h2>
-
-                    <input
-                        type="number"
-                        step="0.01"
-                        placeholder="Exit Price"
-                        value={exitData.exitPrice}
-                        onChange={(e) => setExitData({ ...exitData, exitPrice: e.target.value })}
-                        className="w-full p-3 rounded-lg bg-white/20 text-white placeholder-white/50 border border-white/20"
-                    />
-
-                    <select
-                        value={exitData.exitReason}
-                        onChange={(e) => setExitData({ ...exitData, exitReason: e.target.value })}
-                        className="w-full p-3 rounded-lg bg-white/20 text-white border border-white/20"
-                    >
+                    <h2 className="text-xl font-bold text-white">Exit: {selectedTrade.symbol}</h2>
+                    <input type="number" step="0.01" placeholder="Exit Price" value={exit.exitPrice} onChange={(e) => setExit({ ...exit, exitPrice: e.target.value })} className="w-full p-3 rounded-lg bg-white/20 text-white placeholder-white/50 border border-white/20" />
+                    <select value={exit.exitReason} onChange={(e) => setExit({ ...exit, exitReason: e.target.value })} className="w-full p-3 rounded-lg bg-white/20 text-white border border-white/20">
                         <option value="">Exit Reason</option>
                         <option value="Target Hit">🎯 Target Hit</option>
                         <option value="Stop Loss">🛑 Stop Loss</option>
                         <option value="Time Exit">⏰ Time Exit</option>
-                        <option value="Manual">✋ Manual Exit</option>
+                        <option value="Manual">✋ Manual</option>
                     </select>
-
-                    <textarea
-                        placeholder="Lessons learned..."
-                        value={exitData.lessons}
-                        onChange={(e) => setExitData({ ...exitData, lessons: e.target.value })}
-                        rows="2"
-                        className="w-full p-3 rounded-lg bg-white/20 text-white placeholder-white/50 border border-white/20"
-                    />
-
+                    <textarea placeholder="Lessons" value={exit.lessons} onChange={(e) => setExit({ ...exit, lessons: e.target.value })} rows="2" className="w-full p-3 rounded-lg bg-white/20 text-white placeholder-white/50 border border-white/20" />
                     <div className="flex gap-2">
-                        <button
-                            type="button"
-                            onClick={() => setSelectedTrade(null)}
-                            className="flex-1 bg-white/20 hover:bg-white/30 text-white font-semibold py-3 rounded-lg"
-                        >
-                            Cancel
-                        </button>
-                        <button
-                            type="submit"
-                            disabled={loading}
-                            className="flex-1 bg-blue-500 hover:bg-blue-600 text-white font-bold py-3 rounded-lg disabled:opacity-50"
-                        >
-                            {loading ? '⏳ Sending...' : '✅ Log Exit'}
-                        </button>
+                        <button type="button" onClick={() => setSelectedTrade(null)} className="flex-1 bg-white/20 text-white font-semibold py-3 rounded-lg">Cancel</button>
+                        <button type="submit" disabled={loading} className="flex-1 bg-blue-500 text-white font-bold py-3 rounded-lg">{loading ? '⏳ Saving...' : '✅ Log Exit'}</button>
                     </div>
                 </form>
             );
         }
 
-        // Analytics Component
         function Analytics({ trades }) {
-            const closedTrades = trades.filter(t => t.status === 'CLOSED');
-
-            if (closedTrades.length === 0) {
-                return (
-                    <div className="bg-white/10 backdrop-blur-lg rounded-2xl p-6">
-                        <h2 className="text-xl font-bold text-white mb-4">📈 Advanced Analytics</h2>
-                        <p className="text-white/60 text-center py-8">No closed trades yet. Complete at least one trade to see analytics!</p>
-                    </div>
-                );
-            }
-
-            // Calculate metrics
-            const totalPnl = closedTrades.reduce((sum, t) => sum + (t.pnl || 0), 0);
-            const winners = closedTrades.filter(t => t.pnl > 0);
-            const losers = closedTrades.filter(t => t.pnl < 0);
-            
-            const avgWin = winners.length > 0 ? winners.reduce((sum, t) => sum + t.pnl, 0) / winners.length : 0;
-            const avgLoss = losers.length > 0 ? Math.abs(losers.reduce((sum, t) => sum + t.pnl, 0) / losers.length) : 0;
-            const expectancy = (totalPnl / closedTrades.length).toFixed(2);
-            
-            const grossWin = winners.reduce((sum, t) => sum + t.pnl, 0);
-            const grossLoss = Math.abs(losers.reduce((sum, t) => sum + t.pnl, 0));
-            const profitFactor = grossLoss > 0 ? (grossWin / grossLoss).toFixed(2) : '∞';
-
-            // Strategy breakdown
-            const strategies = {};
-            closedTrades.forEach(t => {
-                const strat = t.strategy || 'Not specified';
-                if (!strategies[strat]) strategies[strat] = { count: 0, wins: 0, pnl: 0 };
-                strategies[strat].count++;
-                if (t.pnl > 0) strategies[strat].wins++;
-                strategies[strat].pnl += t.pnl;
-            });
-
-            // Emotion breakdown
-            const emotions = {};
-            closedTrades.forEach(t => {
-                const emotion = t.emotionBefore || 'Not specified';
-                if (!emotions[emotion]) emotions[emotion] = { count: 0, wins: 0 };
-                emotions[emotion].count++;
-                if (t.pnl > 0) emotions[emotion].wins++;
-            });
-
-            // Recent trades
-            const recentTrades = [...closedTrades].reverse().slice(0, 5);
-
+            const closed = trades.filter(t => t.status === 'CLOSED');
+            if (closed.length === 0) return <div className="bg-white/10 backdrop-blur-lg rounded-2xl p-6"><h2 className="text-xl font-bold text-white mb-4">📈 Analytics</h2><p className="text-white/60 text-center py-8">No closed trades yet</p></div>;
+            const totalPnl = closed.reduce((s, t) => s + (t.pnl || 0), 0);
+            const winners = closed.filter(t => t.pnl > 0);
+            const losers = closed.filter(t => t.pnl < 0);
+            const avgWin = winners.length ? winners.reduce((s, t) => s + t.pnl, 0) / winners.length : 0;
+            const avgLoss = losers.length ? Math.abs(losers.reduce((s, t) => s + t.pnl, 0) / losers.length) : 0;
             return (
                 <div className="bg-white/10 backdrop-blur-lg rounded-2xl p-6 space-y-4">
-                    <h2 className="text-xl font-bold text-white mb-4">📈 Advanced Analytics</h2>
-                    
-                    {/* Key Metrics */}
+                    <h2 className="text-xl font-bold text-white">📈 Analytics</h2>
                     <div className="grid grid-cols-2 gap-4">
-                        <MetricCard label="Expectancy" value={`₹${expectancy}`} color="text-white" />
-                        <MetricCard label="Profit Factor" value={profitFactor} color="text-white" />
+                        <MetricCard label="Expectancy" value={`₹${(totalPnl / closed.length).toFixed(2)}`} color="text-white" />
                         <MetricCard label="Avg Win" value={`₹${avgWin.toFixed(0)}`} color="text-green-300" />
                         <MetricCard label="Avg Loss" value={`₹${avgLoss.toFixed(0)}`} color="text-red-300" />
+                        <MetricCard label="Total P&L" value={`₹${totalPnl.toFixed(0)}`} color={totalPnl >= 0 ? 'text-green-300' : 'text-red-300'} />
                     </div>
-
-                    {/* Strategy Breakdown */}
-                    <div className="bg-white/5 rounded-lg p-4">
-                        <h3 className="text-white font-semibold mb-3">Performance by Strategy</h3>
-                        <div className="space-y-2">
-                            {Object.entries(strategies).map(([name, data]) => {
-                                const winRate = ((data.wins / data.count) * 100).toFixed(0);
-                                return (
-                                    <div key={name} className="flex justify-between text-sm">
-                                        <span className="text-white">{name}</span>
-                                        <span className="text-white/70">
-                                            {data.count} trades • {winRate}% WR • {data.pnl >= 0 ? '+' : ''}₹{data.pnl.toFixed(0)}
-                                        </span>
-                                    </div>
-                                );
-                            })}
-                        </div>
-                    </div>
-
-                    {/* Emotion Breakdown */}
-                    <div className="bg-white/5 rounded-lg p-4">
-                        <h3 className="text-white font-semibold mb-3">Performance by Emotion</h3>
-                        <div className="space-y-2">
-                            {Object.entries(emotions).map(([emotion, data]) => {
-                                const winRate = ((data.wins / data.count) * 100).toFixed(0);
-                                return (
-                                    <div key={emotion} className="flex justify-between text-sm">
-                                        <span className="text-white">{emotion}</span>
-                                        <span className="text-white/70">
-                                            {data.count} trades • {winRate}% WR
-                                        </span>
-                                    </div>
-                                );
-                            })}
-                        </div>
-                    </div>
-
-                    {/* Recent Trades */}
                     <div className="bg-white/5 rounded-lg p-4">
                         <h3 className="text-white font-semibold mb-3">Recent Trades</h3>
-                        <div className="space-y-2">
-                            {recentTrades.map(trade => (
-                                <div key={trade.id} className="flex justify-between items-center text-sm p-2 bg-white/5 rounded">
-                                    <span className="text-white font-semibold">{trade.symbol}</span>
-                                    <span className="text-white/70">{trade.strategy}</span>
-                                    <span className={`font-bold ${trade.pnl >= 0 ? 'text-green-300' : 'text-red-300'}`}>
-                                        {trade.pnl >= 0 ? '+' : ''}₹{trade.pnl.toFixed(0)}
-                                    </span>
-                                </div>
-                            ))}
-                        </div>
+                        {closed.slice(-5).reverse().map(t => (
+                            <div key={t.id} className="flex justify-between p-2 bg-white/5 rounded mb-2">
+                                <span className="text-white">{t.symbol}</span>
+                                <span className={t.pnl >= 0 ? 'text-green-300' : 'text-red-300'}>₹{t.pnl.toFixed(0)}</span>
+                            </div>
+                        ))}
                     </div>
                 </div>
             );
         }
 
-        // Summary Component
         function Summary({ trades, sendTelegram }) {
             const today = new Date().toDateString();
             const todayTrades = trades.filter(t => new Date(t.entryTime).toDateString() === today);
-            const todayPnl = todayTrades.filter(t => t.status === 'CLOSED').reduce((sum, t) => sum + (t.pnl || 0), 0);
-
-            const sendDailySummary = async () => {
-                const closedTrades = todayTrades.filter(t => t.status === 'CLOSED');
-                const openTrades = todayTrades.filter(t => t.status === 'OPEN');
-                const totalPnl = closedTrades.reduce((sum, t) => sum + (t.pnl || 0), 0);
-                const winners = closedTrades.filter(t => t.pnl > 0).length;
-                const losers = closedTrades.filter(t => t.pnl < 0).length;
-
-                const message = `📊 <b>DAILY SUMMARY</b>
-📅 ${new Date().toLocaleDateString('en-IN')}
-
-📈 Total Trades: ${todayTrades.length}
-✅ Closed: ${closedTrades.length}
-⏳ Open: ${openTrades.length}
-
-${closedTrades.length > 0 ? `🎯 Winners: ${winners}
-❌ Losers: ${losers}
-📊 Win Rate: ${((winners / closedTrades.length) * 100).toFixed(1)}%
-
-💰 <b>Net P&L: ${totalPnl >= 0 ? '+' : ''}₹${totalPnl.toFixed(2)}</b>` : 'No closed trades today.'}`;
-
-                await sendTelegram(message);
-                alert('✅ Daily summary sent!');
-            };
-
-            const sendMonthlySummary = async () => {
-                const now = new Date();
-                const currentMonth = now.getMonth();
-                const currentYear = now.getFullYear();
-                
-                const monthTrades = trades.filter(t => {
-                    const tradeDate = new Date(t.entryTime);
-                    return tradeDate.getMonth() === currentMonth && tradeDate.getFullYear() === currentYear;
-                });
-                
-                const closedTrades = monthTrades.filter(t => t.status === 'CLOSED');
-                const openTrades = monthTrades.filter(t => t.status === 'OPEN');
-                
-                const totalPnl = closedTrades.reduce((sum, t) => sum + (t.pnl || 0), 0);
-                const winners = closedTrades.filter(t => t.pnl > 0).length;
-                const losers = closedTrades.filter(t => t.pnl < 0).length;
-                
-                const sortedTrades = [...closedTrades].sort((a, b) => b.pnl - a.pnl);
-                const bestTrade = sortedTrades[0];
-                const worstTrade = sortedTrades[sortedTrades.length - 1];
-                
-                const avgPnl = closedTrades.length > 0 ? totalPnl / closedTrades.length : 0;
-                const avgR = closedTrades.length > 0 
-                    ? (closedTrades.reduce((sum, t) => sum + (t.rMultiple || 0), 0) / closedTrades.length).toFixed(2)
-                    : 0;
-                
-                const grossWin = closedTrades.filter(t => t.pnl > 0).reduce((sum, t) => sum + t.pnl, 0);
-                const grossLoss = Math.abs(closedTrades.filter(t => t.pnl < 0).reduce((sum, t) => sum + t.pnl, 0));
-                const profitFactor = grossLoss > 0 ? (grossWin / grossLoss).toFixed(2) : '∞';
-                
-                // Strategy breakdown
-                const strategies = {};
-                closedTrades.forEach(t => {
-                    const strat = t.strategy || 'Not specified';
-                    if (!strategies[strat]) strategies[strat] = { count: 0, wins: 0, pnl: 0 };
-                    strategies[strat].count++;
-                    if (t.pnl > 0) strategies[strat].wins++;
-                    strategies[strat].pnl += t.pnl;
-                });
-                
-                const monthName = now.toLocaleDateString('en-IN', { month: 'long', year: 'numeric' });
-
-                let strategyText = '';
-                Object.entries(strategies).forEach(([name, data]) => {
-                    const winRate = ((data.wins / data.count) * 100).toFixed(0);
-                    strategyText += `${name}: ${data.count} trades, ${winRate}% WR, ${data.pnl >= 0 ? '+' : ''}₹${data.pnl.toFixed(0)}\n`;
-                });
-
-                const message = `📅 <b>MONTHLY SUMMARY - ${monthName}</b>
-
-📊 <b>OVERVIEW</b>
-📈 Total Trades: ${monthTrades.length}
-✅ Closed: ${closedTrades.length}
-⏳ Open: ${openTrades.length}
-
-${closedTrades.length > 0 ? `🎯 <b>PERFORMANCE</b>
-Winners: ${winners} (${((winners / closedTrades.length) * 100).toFixed(1)}%)
-Losers: ${losers} (${((losers / closedTrades.length) * 100).toFixed(1)}%)
-
-💰 <b>P&L STATS</b>
-Net P&L: ${totalPnl >= 0 ? '+' : ''}₹${totalPnl.toFixed(2)}
-Avg P&L: ${avgPnl >= 0 ? '+' : ''}₹${avgPnl.toFixed(2)}
-Avg R-Multiple: ${avgR}R
-Profit Factor: ${profitFactor}
-
-${bestTrade ? `🏆 Best: ${bestTrade.symbol} (+₹${bestTrade.pnl.toFixed(2)}, ${bestTrade.rMultiple.toFixed(2)}R)\n` : ''}${worstTrade ? `📉 Worst: ${worstTrade.symbol} (₹${worstTrade.pnl.toFixed(2)}, ${worstTrade.rMultiple.toFixed(2)}R)\n` : ''}
-${strategyText ? `📊 <b>BY STRATEGY</b>\n${strategyText}` : ''}` : 'No closed trades this month.'}
-${openTrades.length > 0 ? `\n<b>Open: ${openTrades.length}</b>\n${openTrades.map(t => `• ${t.symbol} ${t.type} @ ₹${t.entry}`).join('\n')}` : ''}`;
-
-                await sendTelegram(message);
-                alert('✅ Monthly summary sent!');
-            };
-
             return (
                 <div className="bg-white/10 backdrop-blur-lg rounded-2xl p-6 space-y-4">
-                    <h2 className="text-xl font-bold text-white mb-4">📊 Summary</h2>
-
-                    <div className="grid grid-cols-2 gap-4">
-                        <MetricCard label="Total Trades" value={todayTrades.length} color="text-white" />
-                        <MetricCard label="Today P&L" value={`₹${todayPnl.toFixed(2)}`} color={todayPnl >= 0 ? 'text-green-300' : 'text-red-300'} />
-                    </div>
-
-                    <button
-                        onClick={sendDailySummary}
-                        className="w-full bg-purple-500 hover:bg-purple-600 text-white font-bold py-3 rounded-lg"
-                    >
-                        📊 Send Daily Summary
-                    </button>
-
-                    <button
-                        onClick={sendMonthlySummary}
-                        className="w-full bg-indigo-500 hover:bg-indigo-600 text-white font-bold py-3 rounded-lg"
-                    >
-                        📅 Send Monthly Summary
-                    </button>
-
-                    <div className="pt-4">
-                        <h3 className="text-white font-semibold mb-3">Today's Trades</h3>
-                        {todayTrades.length === 0 ? (
-                            <p className="text-white/60 text-center py-8">No trades today</p>
-                        ) : (
-                            <div className="space-y-2">
-                                {todayTrades.map(trade => (
-                                    <div key={trade.id} className="bg-white/10 rounded-lg p-3 border border-white/20">
-                                        <div className="flex justify-between items-start">
-                                            <div>
-                                                <div className="text-white font-semibold">{trade.symbol}</div>
-                                                <div className="text-white/60 text-xs">{trade.type} • {trade.strategy}</div>
-                                            </div>
-                                            <div className="text-right">
-                                                <div className={`text-xs font-semibold px-2 py-1 rounded ${trade.status === 'OPEN' ? 'bg-yellow-500/20 text-yellow-300' : 'bg-gray-500/20 text-gray-300'}`}>
-                                                    {trade.status}
-                                                </div>
-                                                {trade.status === 'CLOSED' && (
-                                                    <div className={`text-sm font-bold mt-1 ${trade.pnl >= 0 ? 'text-green-300' : 'text-red-300'}`}>
-                                                        {trade.pnl >= 0 ? '+' : ''}₹{trade.pnl.toFixed(2)}
-                                                    </div>
-                                                )}
-                                            </div>
-                                        </div>
-                                    </div>
-                                ))}
+                    <h2 className="text-xl font-bold text-white">📊 Summary</h2>
+                    <button onClick={async () => { await sendTelegram(`📊 DAILY SUMMARY\n${new Date().toLocaleDateString()}\n\nTrades: ${todayTrades.length}`); alert('✅ Sent!'); }} className="w-full bg-purple-500 text-white font-bold py-3 rounded-lg">Send Daily Summary</button>
+                    <div className="space-y-2">
+                        {todayTrades.map(t => (
+                            <div key={t.id} className="bg-white/10 rounded-lg p-3 flex justify-between">
+                                <div><div className="text-white font-semibold">{t.symbol}</div><div className="text-white/60 text-xs">{t.type}</div></div>
+                                <div className={`text-xs px-2 py-1 rounded ${t.status === 'OPEN' ? 'bg-yellow-500/20 text-yellow-300' : 'bg-gray-500/20 text-gray-300'}`}>{t.status}</div>
                             </div>
-                        )}
+                        ))}
                     </div>
                 </div>
             );
         }
 
-        // Render the app
         ReactDOM.render(<TradingJournal />, document.getElementById('root'));
     </script>
 </body>
