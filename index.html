@@ -43,20 +43,29 @@
             }, []);
 
             const loadTrades = () => {
-                const saved = localStorage.getItem('pro-trades');
-                if (saved) {
-                    setTrades(JSON.parse(saved));
+                try {
+                    const saved = localStorage.getItem('pro-trades');
+                    if (saved) {
+                        setTrades(JSON.parse(saved));
+                    }
+                } catch (error) {
+                    console.log('No saved trades yet');
+                    setTrades([]);
                 }
             };
 
             const saveTrades = (newTrades) => {
                 setTrades(newTrades);
-                localStorage.setItem('pro-trades', JSON.stringify(newTrades));
+                try {
+                    localStorage.setItem('pro-trades', JSON.stringify(newTrades));
+                } catch (error) {
+                    console.error('Failed to save trades:', error);
+                }
             };
 
             const sendTelegram = async (message) => {
                 try {
-                    await fetch(`https://api.telegram.org/bot${CONFIG.BOT_TOKEN}/sendMessage`, {
+                    const response = await fetch(`https://api.telegram.org/bot${CONFIG.BOT_TOKEN}/sendMessage`, {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify({
@@ -65,24 +74,33 @@
                             parse_mode: 'HTML'
                         })
                     });
-                    return true;
+                    
+                    if (!response.ok) {
+                        throw new Error(`HTTP error! status: ${response.status}`);
+                    }
+                    
+                    return { success: true };
                 } catch (error) {
                     console.error('Telegram error:', error);
-                    return false;
+                    return { success: false, error: error.message };
                 }
             };
 
             const saveToSheets = async (trade, action = 'addTrade') => {
-                if (!CONFIG.SHEETS_API_URL) return;
+                if (!CONFIG.SHEETS_API_URL) return { success: false, error: 'No URL configured' };
                 
                 try {
-                    await fetch(`${CONFIG.SHEETS_API_URL}?action=${action}`, {
+                    const response = await fetch(`${CONFIG.SHEETS_API_URL}?action=${action}`, {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify(trade)
+                        body: JSON.stringify(trade),
+                        mode: 'no-cors'
                     });
+                    
+                    return { success: true };
                 } catch (error) {
                     console.error('Sheets error:', error);
+                    return { success: false, error: error.message };
                 }
             };
 
@@ -304,11 +322,11 @@
                     rrRatio: riskData?.rrRatio || 0
                 };
 
-                // Save to sheets
-                await saveToSheets(trade);
-
-                // Send telegram
-                const message = `🟢 <b>TRADE ENTRY</b>
+                // Try to save to sheets
+                const sheetsResult = await saveToSheets(trade);
+                
+                // Try to send telegram
+                const telegramResult = await sendTelegram(`🟢 <b>TRADE ENTRY</b>
 
 📊 Symbol: <b>${trade.symbol}</b>
 ${trade.type === 'BUY' ? '📈' : '📉'} Type: <b>${trade.type}</b> | ⏱️ ${trade.timeframe}
@@ -328,11 +346,9 @@ Emotion: ${trade.emotionBefore || 'Not specified'}
 Following Plan: ${trade.followingPlan}
 
 ⏰ Time: ${trade.entryTime}
-${trade.notes ? `📝 Notes: ${trade.notes}` : ''}`;
+${trade.notes ? `📝 Notes: ${trade.notes}` : ''}`);
 
-                await sendTelegram(message);
-
-                // Save locally
+                // Save locally (always works)
                 saveTrades([...trades, trade]);
 
                 // Reset form
@@ -343,7 +359,16 @@ ${trade.notes ? `📝 Notes: ${trade.notes}` : ''}`;
                 });
                 setRiskData(null);
                 setLoading(false);
-                alert('✅ Trade logged successfully!');
+                
+                // Show detailed status
+                let statusMsg = '✅ Trade saved locally!';
+                if (telegramResult.success) {
+                    statusMsg += '\n✅ Telegram notification sent!';
+                } else {
+                    statusMsg += '\n⚠️ Telegram: Failed';
+                }
+                
+                alert(statusMsg);
             };
 
             return (
@@ -482,7 +507,7 @@ ${trade.notes ? `📝 Notes: ${trade.notes}` : ''}`;
             );
         }
 
-        // Exit Tab Component (simplified)
+        // Exit Tab Component
         function ExitTab({ trades, saveTrades, sendTelegram, saveToSheets, formatTime, calculateHoldingTime, selectedTrade, setSelectedTrade }) {
             const openTrades = trades.filter(t => t.status === 'OPEN');
 
@@ -584,7 +609,7 @@ ${trade.notes ? `📝 Notes: ${trade.notes}` : ''}`;
                 await saveToSheets(updatedTrade, 'updateTrade');
 
                 // Send telegram
-                const message = `${pnl >= 0 ? '🟢' : '🔴'} <b>TRADE EXIT</b>
+                const telegramResult = await sendTelegram(`${pnl >= 0 ? '🟢' : '🔴'} <b>TRADE EXIT</b>
 
 📊 Symbol: <b>${updatedTrade.symbol}</b>
 ${updatedTrade.type === 'BUY' ? '📈' : '📉'} Type: <b>${updatedTrade.type}</b>
@@ -597,9 +622,7 @@ ${updatedTrade.type === 'BUY' ? '📈' : '📉'} Type: <b>${updatedTrade.type}</
 ⏱️ Holding: ${holdingTime}
 
 Exit Reason: ${exitData.exitReason}
-${exitData.lessons ? `💡 Lesson: ${exitData.lessons}` : ''}`;
-
-                await sendTelegram(message);
+${exitData.lessons ? `💡 Lesson: ${exitData.lessons}` : ''}`);
 
                 // Update locally
                 const updatedTrades = trades.map(t => t.id === selectedTrade.id ? updatedTrade : t);
@@ -607,7 +630,12 @@ ${exitData.lessons ? `💡 Lesson: ${exitData.lessons}` : ''}`;
 
                 setLoading(false);
                 setSelectedTrade(null);
-                alert('✅ Trade exit logged!');
+                
+                let statusMsg = '✅ Trade exit logged!';
+                if (telegramResult.success) {
+                    statusMsg += '\n✅ Telegram notification sent!';
+                }
+                alert(statusMsg);
             };
 
             return (
@@ -847,8 +875,6 @@ ${closedTrades.length > 0 ? `🎯 Winners: ${winners}
                     if (t.pnl > 0) strategies[strat].wins++;
                     strategies[strat].pnl += t.pnl;
                 });
-                
-                const mostTraded = Object.entries(strategies).sort((a, b) => b[1].count - a[1].count)[0];
                 
                 const monthName = now.toLocaleDateString('en-IN', { month: 'long', year: 'numeric' });
 
