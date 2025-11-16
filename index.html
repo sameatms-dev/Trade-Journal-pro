@@ -65,6 +65,7 @@
                     console.log('Sheets response:', text);
                     return JSON.parse(text);
                 } catch (error) {
+                    console.error('Sheets error:', error);
                     return { success: false, error: error.message };
                 }
             };
@@ -157,9 +158,9 @@
             const tabs = ['entry', 'exit', 'analytics', 'summary'];
             const labels = { entry: 'Entry', exit: 'Exit', analytics: 'Analytics', summary: 'Summary' };
             return (
-                <div className="flex gap-2 mb-4">
+                <div className="flex gap-2 mb-4 overflow-x-auto">
                     {tabs.map(tab => (
-                        <button key={tab} onClick={() => setActiveTab(tab)} className={`px-4 py-3 rounded-xl font-semibold ${activeTab === tab ? 'bg-blue-500 text-white' : 'bg-white/10 text-white/70'}`}>
+                        <button key={tab} onClick={() => setActiveTab(tab)} className={`flex-shrink-0 px-4 py-3 rounded-xl font-semibold ${activeTab === tab ? 'bg-blue-500 text-white' : 'bg-white/10 text-white/70'}`}>
                             {labels[tab]}
                         </button>
                     ))}
@@ -189,13 +190,13 @@
                 if (!form.symbol || !form.entry || !form.quantity || !form.target || !form.stoploss) return alert('Fill all fields!');
                 setLoading(true);
                 const trade = { id: Date.now(), ...form, entry: parseFloat(form.entry), quantity: parseInt(form.quantity), target: parseFloat(form.target), stoploss: parseFloat(form.stoploss), entryTime: formatTime(), entryTimestamp: Date.now(), status: 'OPEN', pnl: 0, rMultiple: 0, totalRisk: risk?.totalRisk || 0, rrRatio: risk?.rrRatio || 0 };
-                await saveToSheets(trade);
-                await sendTelegram(`🟢 TRADE ENTRY\n\n📊 ${trade.symbol} ${trade.type}\n💰 Entry: ₹${trade.entry}\n🎯 Target: ₹${trade.target}\n🛑 SL: ₹${trade.stoploss}\n📦 Qty: ${trade.quantity}\n\nRisk: ₹${trade.totalRisk.toFixed(2)} | R:R 1:${trade.rrRatio}\nStrategy: ${trade.strategy}\n⏰ ${trade.entryTime}`);
+                const sheetsResult = await saveToSheets(trade);
+                await sendTelegram(`🟢 <b>TRADE ENTRY</b>\n\n📊 ${trade.symbol} ${trade.type}\n💰 Entry: ₹${trade.entry}\n🎯 Target: ₹${trade.target}\n🛑 SL: ₹${trade.stoploss}\n📦 Qty: ${trade.quantity}\n\nRisk: ₹${trade.totalRisk.toFixed(2)} | R:R 1:${trade.rrRatio}\nStrategy: ${trade.strategy}\n⏰ ${trade.entryTime}`);
                 saveTrades([...trades, trade]);
                 setForm({ symbol: '', type: 'BUY', timeframe: 'Intraday', entry: '', quantity: '', target: '', stoploss: '', strategy: '', setupQuality: 5, emotionBefore: '', notes: '' });
                 setRisk(null);
                 setLoading(false);
-                alert('✅ Trade logged!');
+                alert(sheetsResult.success ? '✅ Trade logged & saved to Google Sheets!' : '✅ Trade logged locally!\n⚠️ Sheets: ' + (sheetsResult.error || 'Check console'));
             };
 
             return (
@@ -288,7 +289,7 @@
                 const holdingTime = calculateHoldingTime(selectedTrade.entryTimestamp, Date.now());
                 const updated = { ...selectedTrade, status: 'CLOSED', exitPrice, exitTime: formatTime(), exitTimestamp: Date.now(), pnl, rMultiple, holdingTime, ...exit };
                 await saveToSheets(updated, 'updateTrade');
-                await sendTelegram(`${pnl >= 0 ? '🟢' : '🔴'} TRADE EXIT\n\n📊 ${updated.symbol} ${updated.type}\n💰 Entry: ₹${updated.entry}\n🚪 Exit: ₹${exitPrice}\n\n💸 P&L: ₹${pnl.toFixed(2)}\n📊 R: ${rMultiple.toFixed(2)}R\n⏱️ ${holdingTime}\n\n${exit.exitReason}`);
+                await sendTelegram(`${pnl >= 0 ? '🟢' : '🔴'} <b>TRADE EXIT</b>\n\n📊 ${updated.symbol} ${updated.type}\n💰 Entry: ₹${updated.entry}\n🚪 Exit: ₹${exitPrice}\n\n💸 P&L: ₹${pnl.toFixed(2)}\n📊 R: ${rMultiple.toFixed(2)}R\n⏱️ ${holdingTime}\n\n${exit.exitReason}`);
                 saveTrades(trades.map(t => t.id === selectedTrade.id ? updated : t));
                 setLoading(false);
                 setSelectedTrade(null);
@@ -348,17 +349,145 @@
         function Summary({ trades, sendTelegram }) {
             const today = new Date().toDateString();
             const todayTrades = trades.filter(t => new Date(t.entryTime).toDateString() === today);
+            const todayPnl = todayTrades.filter(t => t.status === 'CLOSED').reduce((s, t) => s + (t.pnl || 0), 0);
+
+            const sendDailySummary = async () => {
+                const closed = todayTrades.filter(t => t.status === 'CLOSED');
+                const open = todayTrades.filter(t => t.status === 'OPEN');
+                const winners = closed.filter(t => t.pnl > 0).length;
+                const losers = closed.filter(t => t.pnl < 0).length;
+                const winRate = closed.length > 0 ? ((winners / closed.length) * 100).toFixed(1) : '0';
+                
+                const message = `📊 <b>DAILY SUMMARY</b>
+📅 ${new Date().toLocaleDateString('en-IN')}
+
+📈 Total Trades: ${todayTrades.length}
+✅ Closed: ${closed.length}
+⏳ Open: ${open.length}
+
+${closed.length > 0 ? `🎯 Winners: ${winners}
+❌ Losers: ${losers}
+📊 Win Rate: ${winRate}%
+
+💰 <b>Net P&L: ₹${todayPnl.toFixed(2)}</b>` : 'No closed trades today.'}`;
+
+                await sendTelegram(message);
+                alert('✅ Daily summary sent to Telegram!');
+            };
+
+            const sendMonthlySummary = async () => {
+                const now = new Date();
+                const monthTrades = trades.filter(t => {
+                    const d = new Date(t.entryTime);
+                    return d.getMonth() === now.getMonth() && d.getFullYear() === now.getFullYear();
+                });
+                
+                const closed = monthTrades.filter(t => t.status === 'CLOSED');
+                const open = monthTrades.filter(t => t.status === 'OPEN');
+                const totalPnl = closed.reduce((s, t) => s + (t.pnl || 0), 0);
+                const winners = closed.filter(t => t.pnl > 0);
+                const losers = closed.filter(t => t.pnl < 0);
+                const winRate = closed.length > 0 ? ((winners.length / closed.length) * 100).toFixed(1) : '0';
+                
+                const avgPnl = closed.length > 0 ? (totalPnl / closed.length).toFixed(2) : '0';
+                const avgR = closed.length > 0 ? (closed.reduce((s, t) => s + (t.rMultiple || 0), 0) / closed.length).toFixed(2) : '0.00';
+                
+                const grossWin = winners.reduce((s, t) => s + t.pnl, 0);
+                const grossLoss = Math.abs(losers.reduce((s, t) => s + t.pnl, 0));
+                const profitFactor = grossLoss > 0 ? (grossWin / grossLoss).toFixed(2) : closed.length > 0 ? '∞' : '0';
+                
+                const sortedTrades = [...closed].sort((a, b) => b.pnl - a.pnl);
+                const bestTrade = sortedTrades[0];
+                const worstTrade = sortedTrades[sortedTrades.length - 1];
+                
+                const monthName = now.toLocaleDateString('en-IN', { month: 'long', year: 'numeric' });
+                
+                const strategies = {};
+                closed.forEach(t => {
+                    const strat = t.strategy || 'Not specified';
+                    if (!strategies[strat]) strategies[strat] = { count: 0, wins: 0, pnl: 0 };
+                    strategies[strat].count++;
+                    if (t.pnl > 0) strategies[strat].wins++;
+                    strategies[strat].pnl += t.pnl;
+                });
+                
+                let strategyText = '';
+                Object.entries(strategies).forEach(([name, data]) => {
+                    const stratWinRate = ((data.wins / data.count) * 100).toFixed(0);
+                    strategyText += `\n${name}: ${data.count} trades, ${stratWinRate}% WR, ${data.pnl >= 0 ? '+' : ''}₹${data.pnl.toFixed(0)}`;
+                });
+                
+                const message = `📅 <b>MONTHLY SUMMARY - ${monthName}</b>
+
+📊 <b>OVERVIEW</b>
+📈 Total Trades: ${monthTrades.length}
+✅ Closed: ${closed.length}
+⏳ Open: ${open.length}
+
+${closed.length > 0 ? `🎯 <b>PERFORMANCE</b>
+Winners: ${winners.length} (${winRate}%)
+Losers: ${losers.length} (${((losers.length/closed.length)*100).toFixed(1)}%)
+
+💰 <b>P&L STATS</b>
+Net P&L: ${totalPnl >= 0 ? '+' : ''}₹${totalPnl.toFixed(2)}
+Avg P&L: ${avgPnl >= 0 ? '+' : ''}₹${avgPnl}
+Avg R-Multiple: ${avgR}R
+Profit Factor: ${profitFactor}
+
+${bestTrade ? `🏆 Best Trade: ${bestTrade.symbol} (+₹${bestTrade.pnl.toFixed(2)}, ${bestTrade.rMultiple.toFixed(2)}R)` : ''}
+${worstTrade ? `\n📉 Worst Trade: ${worstTrade.symbol} (₹${worstTrade.pnl.toFixed(2)}, ${worstTrade.rMultiple.toFixed(2)}R)` : ''}
+
+${strategyText ? `\n📊 <b>BY STRATEGY</b>${strategyText}` : ''}` : 'No closed trades this month.'}
+
+${open.length > 0 ? `\n\n<b>⏳ OPEN POSITIONS (${open.length})</b>${open.map(t => `\n• ${t.symbol} ${t.type} @ ₹${t.entry}`).join('')}` : ''}`;
+
+                await sendTelegram(message);
+                alert('✅ Monthly summary sent to Telegram!');
+            };
+
             return (
                 <div className="bg-white/10 backdrop-blur-lg rounded-2xl p-6 space-y-4">
                     <h2 className="text-xl font-bold text-white">📊 Summary</h2>
-                    <button onClick={async () => { await sendTelegram(`📊 DAILY SUMMARY\n${new Date().toLocaleDateString()}\n\nTrades: ${todayTrades.length}`); alert('✅ Sent!'); }} className="w-full bg-purple-500 text-white font-bold py-3 rounded-lg">Send Daily Summary</button>
-                    <div className="space-y-2">
-                        {todayTrades.map(t => (
-                            <div key={t.id} className="bg-white/10 rounded-lg p-3 flex justify-between">
-                                <div><div className="text-white font-semibold">{t.symbol}</div><div className="text-white/60 text-xs">{t.type}</div></div>
-                                <div className={`text-xs px-2 py-1 rounded ${t.status === 'OPEN' ? 'bg-yellow-500/20 text-yellow-300' : 'bg-gray-500/20 text-gray-300'}`}>{t.status}</div>
+                    
+                    <div className="grid grid-cols-2 gap-4">
+                        <MetricCard label="Today Trades" value={todayTrades.length} color="text-white" />
+                        <MetricCard label="Today P&L" value={`₹${todayPnl.toFixed(0)}`} color={todayPnl >= 0 ? 'text-green-300' : 'text-red-300'} />
+                    </div>
+
+                    <button onClick={sendDailySummary} className="w-full bg-purple-500 hover:bg-purple-600 text-white font-bold py-3 rounded-lg transition-colors">
+                        📊 Send Daily Summary
+                    </button>
+
+                    <button onClick={sendMonthlySummary} className="w-full bg-indigo-500 hover:bg-indigo-600 text-white font-bold py-3 rounded-lg transition-colors">
+                        📅 Send Monthly Summary
+                    </button>
+
+                    <div className="pt-4">
+                        <h3 className="text-white font-semibold mb-3">Today's Trades</h3>
+                        {todayTrades.length === 0 ? (
+                            <p className="text-white/60 text-center py-8">No trades today</p>
+                        ) : (
+                            <div className="space-y-2">
+                                {todayTrades.map(t => (
+                                    <div key={t.id} className="bg-white/10 rounded-lg p-3 flex justify-between items-center">
+                                        <div>
+                                            <div className="text-white font-semibold">{t.symbol}</div>
+                                            <div className="text-white/60 text-xs">{t.type} • {t.strategy}</div>
+                                        </div>
+                                        <div className="text-right">
+                                            <div className={`text-xs px-2 py-1 rounded ${t.status === 'OPEN' ? 'bg-yellow-500/20 text-yellow-300' : 'bg-gray-500/20 text-gray-300'}`}>
+                                                {t.status}
+                                            </div>
+                                            {t.status === 'CLOSED' && (
+                                                <div className={`text-sm font-bold mt-1 ${t.pnl >= 0 ? 'text-green-300' : 'text-red-300'}`}>
+                                                    ₹{t.pnl.toFixed(0)}
+                                                </div>
+                                            )}
+                                        </div>
+                                    </div>
+                                ))}
                             </div>
-                        ))}
+                        )}
                     </div>
                 </div>
             );
