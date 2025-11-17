@@ -33,15 +33,85 @@
             const [trades, setTrades] = useState([]);
             const [activeTab, setActiveTab] = useState('entry');
             const [selectedTrade, setSelectedTrade] = useState(null);
+            const [accountBalance, setAccountBalance] = useState(100000);
+            const [commission, setCommission] = useState(0.03);
+            const [commissionMode, setCommissionMode] = useState('percentage'); // 'percentage' or 'fixed'
+            const [commissionType, setCommissionType] = useState('combined'); // 'combined' or 'separate'
+            const [entryCommission, setEntryCommission] = useState(0.03);
+            const [exitCommission, setExitCommission] = useState(0.03);
+            const [filters, setFilters] = useState({ search: '', strategy: '', result: '', dateFrom: '', dateTo: '' });
+            const [showCalculator, setShowCalculator] = useState(false);
 
             useEffect(() => {
                 const saved = localStorage.getItem('pro-trades');
+                const savedBalance = localStorage.getItem('account-balance');
+                const savedCommission = localStorage.getItem('commission-rate');
+                const savedCommissionMode = localStorage.getItem('commission-mode');
+                const savedCommissionType = localStorage.getItem('commission-type');
+                const savedEntryCommission = localStorage.getItem('entry-commission');
+                const savedExitCommission = localStorage.getItem('exit-commission');
                 if (saved) setTrades(JSON.parse(saved));
+                if (savedBalance) setAccountBalance(parseFloat(savedBalance));
+                if (savedCommission) setCommission(parseFloat(savedCommission));
+                if (savedCommissionMode) setCommissionMode(savedCommissionMode);
+                if (savedCommissionType) setCommissionType(savedCommissionType);
+                if (savedEntryCommission) setEntryCommission(parseFloat(savedEntryCommission));
+                if (savedExitCommission) setExitCommission(parseFloat(savedExitCommission));
             }, []);
 
             const saveTrades = (newTrades) => {
                 setTrades(newTrades);
                 localStorage.setItem('pro-trades', JSON.stringify(newTrades));
+            };
+
+            const updateBalance = (newBalance) => {
+                setAccountBalance(newBalance);
+                localStorage.setItem('account-balance', newBalance.toString());
+            };
+
+            const updateCommission = (newCommission) => {
+                setCommission(newCommission);
+                localStorage.setItem('commission-rate', newCommission.toString());
+            };
+            
+            const updateCommissionMode = (mode) => {
+                setCommissionMode(mode);
+                localStorage.setItem('commission-mode', mode);
+            };
+            
+            const updateCommissionType = (type) => {
+                setCommissionType(type);
+                localStorage.setItem('commission-type', type);
+            };
+            
+            const updateEntryCommission = (value) => {
+                setEntryCommission(value);
+                localStorage.setItem('entry-commission', value.toString());
+            };
+            
+            const updateExitCommission = (value) => {
+                setExitCommission(value);
+                localStorage.setItem('exit-commission', value.toString());
+            };
+
+            const resetAllData = () => {
+                if (confirm('⚠️ This will delete ALL trades and reset your account. Are you sure?')) {
+                    setTrades([]);
+                    setAccountBalance(100000);
+                    setCommission(0.03);
+                    setCommissionMode('percentage');
+                    setCommissionType('combined');
+                    setEntryCommission(0.03);
+                    setExitCommission(0.03);
+                    localStorage.removeItem('pro-trades');
+                    localStorage.removeItem('account-balance');
+                    localStorage.removeItem('commission-rate');
+                    localStorage.removeItem('commission-mode');
+                    localStorage.removeItem('commission-type');
+                    localStorage.removeItem('entry-commission');
+                    localStorage.removeItem('exit-commission');
+                    alert('✅ All data reset!');
+                }
             };
 
             const sendTelegram = async (message) => {
@@ -59,7 +129,38 @@
 
             const saveToSheets = async (trade, action = 'addTrade') => {
                 try {
-                    const params = new URLSearchParams({ action, data: JSON.stringify(trade) });
+                    // Prepare complete trade data for Google Sheets
+                    const sheetData = {
+                        id: trade.id,
+                        symbol: trade.symbol,
+                        type: trade.type,
+                        timeframe: trade.timeframe,
+                        entry: trade.entry,
+                        quantity: trade.quantity,
+                        target: trade.target,
+                        stoploss: trade.stoploss,
+                        entryTime: trade.entryTime,
+                        status: trade.status,
+                        exitPrice: trade.exitPrice || '',
+                        exitTime: trade.exitTime || '',
+                        grossPnl: trade.grossPnl || 0,
+                        commissionPaid: trade.commissionPaid || 0,
+                        netPnl: trade.pnl || 0,
+                        rMultiple: trade.rMultiple || 0,
+                        holdingTime: trade.holdingTime || '',
+                        strategy: trade.strategy || '',
+                        exitReason: trade.exitReason || '',
+                        lessons: trade.lessons || '',
+                        notes: trade.notes || '',
+                        setupQuality: trade.setupQuality || '',
+                        emotionBefore: trade.emotionBefore || '',
+                        totalRisk: trade.totalRisk || 0,
+                        rrRatio: trade.rrRatio || 0,
+                        accountBalanceAtEntry: trade.accountBalanceAtEntry || 0,
+                        accountBalanceAtExit: trade.accountBalanceAtExit || 0
+                    };
+                    
+                    const params = new URLSearchParams({ action, data: JSON.stringify(sheetData) });
                     const response = await fetch(`${CONFIG.SHEETS_API_URL}?${params.toString()}`, { method: 'GET' });
                     const text = await response.text();
                     console.log('Sheets response:', text);
@@ -83,8 +184,8 @@
 
             const exportToCSV = () => {
                 if (trades.length === 0) return alert('No trades to export!');
-                const headers = ['ID', 'Symbol', 'Type', 'Timeframe', 'Entry', 'Exit', 'Quantity', 'Target', 'SL', 'Entry Time', 'Exit Time', 'Status', 'P&L', 'R-Multiple', 'Holding', 'Strategy', 'Quality', 'Emotion', 'Notes'];
-                const rows = trades.map(t => [t.id, t.symbol, t.type, t.timeframe, t.entry, t.exitPrice || '', t.quantity, t.target, t.stoploss, t.entryTime, t.exitTime || '', t.status, t.pnl || 0, t.rMultiple || 0, t.holdingTime || '', t.strategy || '', t.setupQuality || '', t.emotionBefore || '', t.notes || '']);
+                const headers = ['ID', 'Symbol', 'Type', 'Timeframe', 'Entry', 'Exit', 'Quantity', 'Target', 'SL', 'Entry Time', 'Exit Time', 'Status', 'Gross P&L', 'Commission', 'Net P&L', 'R-Multiple', 'Holding', 'Strategy', 'Quality', 'Emotion', 'Notes'];
+                const rows = trades.map(t => [t.id, t.symbol, t.type, t.timeframe, t.entry, t.exitPrice || '', t.quantity, t.target, t.stoploss, t.entryTime, t.exitTime || '', t.status, t.grossPnl || 0, t.commissionPaid || 0, t.pnl || 0, t.rMultiple || 0, t.holdingTime || '', t.strategy || '', t.setupQuality || '', t.emotionBefore || '', t.notes || '']);
                 const csv = [headers, ...rows].map(r => r.map(c => String(c).includes(',') ? `"${c}"` : c).join(',')).join('\n');
                 const blob = new Blob([csv], { type: 'text/csv' });
                 const link = document.createElement('a');
@@ -106,30 +207,66 @@
                 const grossLoss = Math.abs(closedTrades.filter(t => t.pnl < 0).reduce((sum, t) => sum + t.pnl, 0));
                 const profitFactor = grossLoss > 0 ? (grossWin / grossLoss).toFixed(2) : closedTrades.length ? '∞' : '0';
                 const bestR = closedTrades.length ? Math.max(...closedTrades.map(t => t.rMultiple || 0)).toFixed(2) : '0.00';
-                return { openTrades, closedTrades, todayPnl, winRate, avgR, profitFactor, bestR, totalClosed: closedTrades.length };
-            }, [trades]);
+                
+                // Portfolio Heat Calculation
+                const totalRiskAtStake = openTrades.reduce((sum, t) => sum + (t.totalRisk || 0), 0);
+                const portfolioHeatPercent = ((totalRiskAtStake / accountBalance) * 100).toFixed(2);
+                
+                return { openTrades, closedTrades, todayPnl, winRate, avgR, profitFactor, bestR, totalClosed: closedTrades.length, totalRiskAtStake, portfolioHeatPercent };
+            }, [trades, accountBalance]);
 
             return (
                 <div className="min-h-screen p-4">
                     <div className="max-w-2xl mx-auto">
-                        <Header stats={stats} exportToCSV={exportToCSV} />
+                        <Header stats={stats} exportToCSV={exportToCSV} resetAllData={resetAllData} accountBalance={accountBalance} />
                         <Tabs activeTab={activeTab} setActiveTab={setActiveTab} />
-                        {activeTab === 'entry' && <EntryForm trades={trades} saveTrades={saveTrades} sendTelegram={sendTelegram} saveToSheets={saveToSheets} formatTime={formatTime} />}
-                        {activeTab === 'exit' && <ExitTab trades={trades} saveTrades={saveTrades} sendTelegram={sendTelegram} saveToSheets={saveToSheets} formatTime={formatTime} calculateHoldingTime={calculateHoldingTime} selectedTrade={selectedTrade} setSelectedTrade={setSelectedTrade} />}
-                        {activeTab === 'analytics' && <Analytics trades={trades} />}
+                        {activeTab === 'entry' && <EntryForm trades={trades} saveTrades={saveTrades} sendTelegram={sendTelegram} saveToSheets={saveToSheets} formatTime={formatTime} accountBalance={accountBalance} updateBalance={updateBalance} commission={commission} commissionMode={commissionMode} commissionType={commissionType} entryCommission={entryCommission} exitCommission={exitCommission} showCalculator={showCalculator} setShowCalculator={setShowCalculator} stats={stats} />}
+                        {activeTab === 'exit' && <ExitTab trades={trades} saveTrades={saveTrades} sendTelegram={sendTelegram} saveToSheets={saveToSheets} formatTime={formatTime} calculateHoldingTime={calculateHoldingTime} selectedTrade={selectedTrade} setSelectedTrade={setSelectedTrade} accountBalance={accountBalance} updateBalance={updateBalance} commission={commission} commissionMode={commissionMode} commissionType={commissionType} entryCommission={entryCommission} exitCommission={exitCommission} />}
+                        {activeTab === 'analytics' && <Analytics trades={trades} accountBalance={accountBalance} updateBalance={updateBalance} commission={commission} updateCommission={updateCommission} commissionMode={commissionMode} updateCommissionMode={updateCommissionMode} commissionType={commissionType} updateCommissionType={updateCommissionType} entryCommission={entryCommission} updateEntryCommission={updateEntryCommission} exitCommission={exitCommission} updateExitCommission={updateExitCommission} saveTrades={saveTrades} filters={filters} setFilters={setFilters} />}}
                         {activeTab === 'summary' && <Summary trades={trades} sendTelegram={sendTelegram} />}
+                        {activeTab === 'reports' && <Reports trades={trades} accountBalance={accountBalance} sendTelegram={sendTelegram} />}
                     </div>
                 </div>
             );
         }
 
-        function Header({ stats, exportToCSV }) {
+        function Header({ stats, exportToCSV, resetAllData, accountBalance }) {
+            const isHighRisk = parseFloat(stats.portfolioHeatPercent) > 10;
+            const isCriticalRisk = parseFloat(stats.portfolioHeatPercent) > 15;
+            
             return (
                 <div className="bg-white/10 backdrop-blur-lg rounded-2xl shadow-2xl p-6 mb-4">
                     <div className="flex justify-between items-center mb-4">
                         <h1 className="text-3xl font-bold text-white">📊 Trading Journal</h1>
-                        <button onClick={exportToCSV} className="bg-green-500 hover:bg-green-600 text-white px-4 py-2 rounded-lg font-semibold">📥 Export</button>
+                        <div className="flex gap-2">
+                            <button onClick={exportToCSV} className="bg-green-500 hover:bg-green-600 text-white px-4 py-2 rounded-lg font-semibold">📥 Export</button>
+                            <button onClick={resetAllData} className="bg-red-500 hover:bg-red-600 text-white px-4 py-2 rounded-lg font-semibold">🔄 Reset</button>
+                        </div>
                     </div>
+                    <div className="bg-gradient-to-r from-blue-500/20 to-purple-500/20 rounded-xl p-4 mb-3 border border-blue-400/30">
+                        <div className="text-white/70 text-sm">Account Balance</div>
+                        <div className="text-white text-3xl font-bold">₹{accountBalance.toLocaleString('en-IN')}</div>
+                    </div>
+                    
+                    {stats.openTrades.length > 0 && (
+                        <div className={`rounded-xl p-4 mb-3 border ${isCriticalRisk ? 'bg-red-500/20 border-red-500/50' : isHighRisk ? 'bg-yellow-500/20 border-yellow-500/50' : 'bg-green-500/20 border-green-500/50'}`}>
+                            <div className="flex justify-between items-center">
+                                <div>
+                                    <div className="text-white/70 text-sm">Portfolio Heat</div>
+                                    <div className={`text-2xl font-bold ${isCriticalRisk ? 'text-red-300' : isHighRisk ? 'text-yellow-300' : 'text-green-300'}`}>
+                                        {stats.portfolioHeatPercent}%
+                                    </div>
+                                </div>
+                                <div className="text-right">
+                                    <div className="text-white/70 text-sm">Total Risk</div>
+                                    <div className="text-white text-xl font-bold">₹{stats.totalRiskAtStake.toFixed(0)}</div>
+                                </div>
+                            </div>
+                            {isCriticalRisk && <div className="text-red-200 text-xs mt-2">⚠️ CRITICAL: Portfolio risk exceeds 15%!</div>}
+                            {isHighRisk && !isCriticalRisk && <div className="text-yellow-200 text-xs mt-2">⚠️ WARNING: High portfolio risk exposure</div>}
+                        </div>
+                    )}
+                    
                     <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-3">
                         <MetricCard label="Open" value={stats.openTrades.length} color="text-yellow-300" />
                         <MetricCard label="Today P&L" value={`₹${stats.todayPnl.toFixed(0)}`} color={stats.todayPnl >= 0 ? 'text-green-300' : 'text-red-300'} />
@@ -155,12 +292,12 @@
         }
 
         function Tabs({ activeTab, setActiveTab }) {
-            const tabs = ['entry', 'exit', 'analytics', 'summary'];
-            const labels = { entry: 'Entry', exit: 'Exit', analytics: 'Analytics', summary: 'Summary' };
+            const tabs = ['entry', 'exit', 'analytics', 'summary', 'reports'];
+            const labels = { entry: 'Entry', exit: 'Exit', analytics: 'Analytics', summary: 'Summary', reports: 'Reports' };
             return (
                 <div className="flex gap-2 mb-4 overflow-x-auto">
                     {tabs.map(tab => (
-                        <button key={tab} onClick={() => setActiveTab(tab)} className={`flex-shrink-0 px-4 py-3 rounded-xl font-semibold ${activeTab === tab ? 'bg-blue-500 text-white' : 'bg-white/10 text-white/70'}`}>
+                        <button key={tab} onClick={() => setActiveTab(tab)} className={`px-4 py-3 rounded-xl font-semibold whitespace-nowrap ${activeTab === tab ? 'bg-blue-500 text-white' : 'bg-white/10 text-white/70'}`}>
                             {labels[tab]}
                         </button>
                     ))}
@@ -168,10 +305,11 @@
             );
         }
 
-        function EntryForm({ trades, saveTrades, sendTelegram, saveToSheets, formatTime }) {
+        function EntryForm({ trades, saveTrades, sendTelegram, saveToSheets, formatTime, accountBalance, updateBalance, commission, commissionMode, commissionType, entryCommission, exitCommission, showCalculator, setShowCalculator, stats }) {
             const [form, setForm] = useState({ symbol: '', type: 'BUY', timeframe: 'Intraday', entry: '', quantity: '', target: '', stoploss: '', strategy: '', setupQuality: 5, emotionBefore: '', notes: '' });
             const [loading, setLoading] = useState(false);
             const [risk, setRisk] = useState(null);
+            const [calcSettings, setCalcSettings] = useState({ method: 'fixed', riskPercent: 2, winRate: 50, avgRR: 2 });
 
             useEffect(() => {
                 if (form.entry && form.stoploss && form.target && form.quantity) {
@@ -181,62 +319,173 @@
                     const qty = parseInt(form.quantity);
                     const riskPer = Math.abs(entry - sl);
                     const rewardPer = Math.abs(tgt - entry);
-                    setRisk({ totalRisk: riskPer * qty, rrRatio: (rewardPer / riskPer).toFixed(2) });
+                    const totalRisk = riskPer * qty;
+                    const riskPercent = (totalRisk / accountBalance) * 100;
+                    
+                    // Calculate commission based on mode and type
+                    let commissionCost = 0;
+                    if (commissionType === 'combined') {
+                        if (commissionMode === 'percentage') {
+                            commissionCost = (entry * qty * commission / 100) * 2; // Entry + Exit
+                        } else {
+                            commissionCost = commission * 2; // Fixed amount * 2
+                        }
+                    } else {
+                        if (commissionMode === 'percentage') {
+                            const entryCost = entry * qty * entryCommission / 100;
+                            const exitCost = entry * qty * exitCommission / 100; // Estimate exit at entry price
+                            commissionCost = entryCost + exitCost;
+                        } else {
+                            commissionCost = entryCommission + exitCommission;
+                        }
+                    }
+                    
+                    const newTotalRisk = stats.totalRiskAtStake + totalRisk;
+                    const newPortfolioHeat = ((newTotalRisk / accountBalance) * 100).toFixed(2);
+                    
+                    setRisk({ 
+                        totalRisk, 
+                        rrRatio: (rewardPer / riskPer).toFixed(2), 
+                        riskPercent: riskPercent.toFixed(2),
+                        commissionCost: commissionCost.toFixed(2),
+                        newPortfolioHeat,
+                        wouldExceedLimit: parseFloat(newPortfolioHeat) > 15
+                    });
                 } else setRisk(null);
-            }, [form.entry, form.stoploss, form.target, form.quantity]);
+            }, [form.entry, form.stoploss, form.target, form.quantity, accountBalance, commission, commissionMode, commissionType, entryCommission, exitCommission, stats.totalRiskAtStake]);
+            
+            const calculatePositionSize = () => {
+                if (!form.entry || !form.stoploss) return alert('Enter price and stop loss first!');
+                
+                const entry = parseFloat(form.entry);
+                const sl = parseFloat(form.stoploss);
+                const riskPerShare = Math.abs(entry - sl);
+                
+                let suggestedQty = 0;
+                
+                if (calcSettings.method === 'fixed') {
+                    const riskAmount = accountBalance * (calcSettings.riskPercent / 100);
+                    suggestedQty = Math.floor(riskAmount / riskPerShare);
+                } else if (calcSettings.method === 'kelly') {
+                    const winRate = calcSettings.winRate / 100;
+                    const avgRR = calcSettings.avgRR;
+                    const kelly = (winRate * avgRR - (1 - winRate)) / avgRR;
+                    const kellyPercent = Math.max(0, Math.min(kelly * 100, 10)); // Cap at 10%
+                    const riskAmount = accountBalance * (kellyPercent / 100);
+                    suggestedQty = Math.floor(riskAmount / riskPerShare);
+                }
+                
+                setForm({ ...form, quantity: suggestedQty.toString() });
+                setShowCalculator(false);
+                alert(`✅ Suggested quantity: ${suggestedQty} shares`);
+            };
 
             const handleSubmit = async (e) => {
                 e.preventDefault();
                 if (!form.symbol || !form.entry || !form.quantity || !form.target || !form.stoploss) return alert('Fill all fields!');
                 setLoading(true);
-                const trade = { id: Date.now(), ...form, entry: parseFloat(form.entry), quantity: parseInt(form.quantity), target: parseFloat(form.target), stoploss: parseFloat(form.stoploss), entryTime: formatTime(), entryTimestamp: Date.now(), status: 'OPEN', pnl: 0, rMultiple: 0, totalRisk: risk?.totalRisk || 0, rrRatio: risk?.rrRatio || 0 };
-                const sheetsResult = await saveToSheets(trade);
-                await sendTelegram(`🟢 <b>TRADE ENTRY</b>\n\n📊 ${trade.symbol} ${trade.type}\n💰 Entry: ₹${trade.entry}\n🎯 Target: ₹${trade.target}\n🛑 SL: ₹${trade.stoploss}\n📦 Qty: ${trade.quantity}\n\nRisk: ₹${trade.totalRisk.toFixed(2)} | R:R 1:${trade.rrRatio}\nStrategy: ${trade.strategy}\n⏰ ${trade.entryTime}`);
+                const trade = { 
+                    id: Date.now(), 
+                    ...form, 
+                    entry: parseFloat(form.entry), 
+                    quantity: parseInt(form.quantity), 
+                    target: parseFloat(form.target), 
+                    stoploss: parseFloat(form.stoploss), 
+                    entryTime: formatTime(), 
+                    entryTimestamp: Date.now(), 
+                    status: 'OPEN', 
+                    pnl: 0, 
+                    rMultiple: 0, 
+                    totalRisk: risk?.totalRisk || 0, 
+                    rrRatio: risk?.rrRatio || 0,
+                    riskPercent: risk?.riskPercent || 0,
+                    commissionPaid: 0,
+                    accountBalanceAtEntry: accountBalance
+                };
+                await saveToSheets(trade);
+                await sendTelegram(`🟢 TRADE ENTRY\n\n📊 ${trade.symbol} ${trade.type}\n💰 Entry: ₹${trade.entry}\n🎯 Target: ₹${trade.target}\n🛑 SL: ₹${trade.stoploss}\n📦 Qty: ${trade.quantity}\n\nRisk: ₹${trade.totalRisk.toFixed(2)} (${risk.riskPercent}%)\nR:R 1:${trade.rrRatio}\nStrategy: ${trade.strategy}\n⏰ ${trade.entryTime}`);
                 saveTrades([...trades, trade]);
                 setForm({ symbol: '', type: 'BUY', timeframe: 'Intraday', entry: '', quantity: '', target: '', stoploss: '', strategy: '', setupQuality: 5, emotionBefore: '', notes: '' });
                 setRisk(null);
                 setLoading(false);
-                alert(sheetsResult.success ? '✅ Trade logged & saved to Google Sheets!' : '✅ Trade logged locally!\n⚠️ Sheets: ' + (sheetsResult.error || 'Check console'));
+                alert('✅ Trade logged!');
             };
 
             return (
                 <form onSubmit={handleSubmit} className="bg-white/10 backdrop-blur-lg rounded-2xl p-6 space-y-4">
                     <h2 className="text-xl font-bold text-white">🟢 New Trade</h2>
+                    
+                    {showCalculator && (
+                        <div className="bg-blue-500/20 border border-blue-500/50 rounded-lg p-4 space-y-3">
+                            <div className="flex justify-between items-center">
+                                <h3 className="text-white font-semibold">📐 Position Size Calculator</h3>
+                                <button type="button" onClick={() => setShowCalculator(false)} className="text-white/70 hover:text-white">✕</button>
+                            </div>
+                            <select value={calcSettings.method} onChange={(e) => setCalcSettings({ ...calcSettings, method: e.target.value })} className="w-full p-2 rounded-lg bg-white/20 text-white border border-white/20">
+                                <option value="fixed" className="bg-gray-800">Fixed % Risk</option>
+                                <option value="kelly" className="bg-gray-800">Kelly Criterion</option>
+                            </select>
+                            {calcSettings.method === 'fixed' && (
+                                <input type="number" step="0.1" placeholder="Risk %" value={calcSettings.riskPercent} onChange={(e) => setCalcSettings({ ...calcSettings, riskPercent: parseFloat(e.target.value) })} className="w-full p-2 rounded-lg bg-white/20 text-white border border-white/20" />
+                            )}
+                            {calcSettings.method === 'kelly' && (
+                                <>
+                                    <input type="number" placeholder="Win Rate %" value={calcSettings.winRate} onChange={(e) => setCalcSettings({ ...calcSettings, winRate: parseFloat(e.target.value) })} className="w-full p-2 rounded-lg bg-white/20 text-white border border-white/20" />
+                                    <input type="number" step="0.1" placeholder="Avg R:R" value={calcSettings.avgRR} onChange={(e) => setCalcSettings({ ...calcSettings, avgRR: parseFloat(e.target.value) })} className="w-full p-2 rounded-lg bg-white/20 text-white border border-white/20" />
+                                </>
+                            )}
+                            <button type="button" onClick={calculatePositionSize} className="w-full bg-blue-500 text-white py-2 rounded-lg font-semibold">Calculate</button>
+                        </div>
+                    )}
+                    
                     <input type="text" placeholder="Symbol" value={form.symbol} onChange={(e) => setForm({ ...form, symbol: e.target.value.toUpperCase() })} className="w-full p-3 rounded-lg bg-white/20 text-white placeholder-white/50 border border-white/20" />
                     <div className="grid grid-cols-2 gap-4">
                         <select value={form.type} onChange={(e) => setForm({ ...form, type: e.target.value })} className="p-3 rounded-lg bg-white/20 text-white border border-white/20">
-                            <option value="BUY">BUY</option>
-                            <option value="SELL">SELL</option>
+                            <option value="BUY" className="bg-gray-800">BUY</option>
+                            <option value="SELL" className="bg-gray-800">SELL</option>
                         </select>
                         <select value={form.timeframe} onChange={(e) => setForm({ ...form, timeframe: e.target.value })} className="p-3 rounded-lg bg-white/20 text-white border border-white/20">
-                            <option value="Intraday">Intraday</option>
-                            <option value="Swing">Swing</option>
-                            <option value="Positional">Positional</option>
+                            <option value="Intraday" className="bg-gray-800">Intraday</option>
+                            <option value="Swing" className="bg-gray-800">Swing</option>
+                            <option value="Positional" className="bg-gray-800">Positional</option>
                         </select>
                     </div>
                     <div className="grid grid-cols-2 gap-4">
                         <input type="number" step="0.01" placeholder="Entry" value={form.entry} onChange={(e) => setForm({ ...form, entry: e.target.value })} className="p-3 rounded-lg bg-white/20 text-white placeholder-white/50 border border-white/20" />
-                        <input type="number" placeholder="Quantity" value={form.quantity} onChange={(e) => setForm({ ...form, quantity: e.target.value })} className="p-3 rounded-lg bg-white/20 text-white placeholder-white/50 border border-white/20" />
+                        <div className="flex gap-2">
+                            <input type="number" placeholder="Quantity" value={form.quantity} onChange={(e) => setForm({ ...form, quantity: e.target.value })} className="flex-1 p-3 rounded-lg bg-white/20 text-white placeholder-white/50 border border-white/20" />
+                            <button type="button" onClick={() => setShowCalculator(!showCalculator)} className="bg-blue-500 text-white px-3 rounded-lg font-bold">📐</button>
+                        </div>
                     </div>
                     <div className="grid grid-cols-2 gap-4">
                         <input type="number" step="0.01" placeholder="Target" value={form.target} onChange={(e) => setForm({ ...form, target: e.target.value })} className="p-3 rounded-lg bg-white/20 text-white placeholder-white/50 border border-white/20" />
                         <input type="number" step="0.01" placeholder="Stop Loss" value={form.stoploss} onChange={(e) => setForm({ ...form, stoploss: e.target.value })} className="p-3 rounded-lg bg-white/20 text-white placeholder-white/50 border border-white/20" />
                     </div>
                     <select value={form.strategy} onChange={(e) => setForm({ ...form, strategy: e.target.value })} className="w-full p-3 rounded-lg bg-white/20 text-white border border-white/20">
-                        <option value="">Strategy</option>
-                        <option value="ORB">ORB</option>
-                        <option value="Breakout">Breakout</option>
-                        <option value="EMA">EMA Crossover</option>
-                        <option value="VWAP">VWAP Bounce</option>
+                        <option value="" className="bg-gray-800">Strategy</option>
+                        <option value="ORB" className="bg-gray-800">ORB</option>
+                        <option value="Breakout" className="bg-gray-800">Breakout</option>
+                        <option value="EMA" className="bg-gray-800">EMA Crossover</option>
+                        <option value="VWAP" className="bg-gray-800">VWAP Bounce</option>
                     </select>
                     <textarea placeholder="Notes" value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} rows="2" className="w-full p-3 rounded-lg bg-white/20 text-white placeholder-white/50 border border-white/20" />
                     {risk && (
-                        <div className="bg-yellow-500/20 border border-yellow-500/50 rounded-lg p-4">
-                            <div className="text-yellow-200 font-semibold mb-2">📊 Analysis</div>
-                            <div className="grid grid-cols-2 gap-2 text-sm text-yellow-100">
+                        <div className={`border rounded-lg p-4 ${risk.wouldExceedLimit ? 'bg-red-500/20 border-red-500/50' : 'bg-yellow-500/20 border-yellow-500/50'}`}>
+                            <div className={`font-semibold mb-2 ${risk.wouldExceedLimit ? 'text-red-200' : 'text-yellow-200'}`}>
+                                📊 Analysis {risk.wouldExceedLimit && '⚠️'}
+                            </div>
+                            <div className={`grid grid-cols-2 gap-2 text-sm ${risk.wouldExceedLimit ? 'text-red-100' : 'text-yellow-100'}`}>
                                 <div>Risk: ₹{risk.totalRisk.toFixed(2)}</div>
                                 <div>R:R: 1:{risk.rrRatio}</div>
+                                <div>Risk %: {risk.riskPercent}%</div>
+                                <div>Commission: ₹{risk.commissionCost}</div>
+                                <div className="col-span-2">New Portfolio Heat: {risk.newPortfolioHeat}%</div>
                             </div>
+                            {risk.wouldExceedLimit && (
+                                <div className="text-red-200 text-xs mt-2 font-semibold">
+                                    ⚠️ WARNING: This trade would push portfolio heat above 15%!
+                                </div>
+                            )}
                         </div>
                     )}
                     <button type="submit" disabled={loading} className="w-full bg-green-500 hover:bg-green-600 text-white font-bold py-3 rounded-lg">
@@ -246,9 +495,9 @@
             );
         }
 
-        function ExitTab({ trades, saveTrades, sendTelegram, saveToSheets, formatTime, calculateHoldingTime, selectedTrade, setSelectedTrade }) {
+        function ExitTab({ trades, saveTrades, sendTelegram, saveToSheets, formatTime, calculateHoldingTime, selectedTrade, setSelectedTrade, accountBalance, updateBalance, commission, commissionMode, commissionType, entryCommission, exitCommission }) {
             const openTrades = trades.filter(t => t.status === 'OPEN');
-            if (selectedTrade) return <ExitForm selectedTrade={selectedTrade} setSelectedTrade={setSelectedTrade} trades={trades} saveTrades={saveTrades} sendTelegram={sendTelegram} saveToSheets={saveToSheets} formatTime={formatTime} calculateHoldingTime={calculateHoldingTime} />;
+            if (selectedTrade) return <ExitForm selectedTrade={selectedTrade} setSelectedTrade={setSelectedTrade} trades={trades} saveTrades={saveTrades} sendTelegram={sendTelegram} saveToSheets={saveToSheets} formatTime={formatTime} calculateHoldingTime={calculateHoldingTime} accountBalance={accountBalance} updateBalance={updateBalance} commission={commission} commissionMode={commissionMode} commissionType={commissionType} entryCommission={entryCommission} exitCommission={exitCommission} />;
             return (
                 <div className="bg-white/10 backdrop-blur-lg rounded-2xl p-6">
                     <h2 className="text-xl font-bold text-white mb-4">🔴 Open Positions</h2>
@@ -274,7 +523,7 @@
             );
         }
 
-        function ExitForm({ selectedTrade, setSelectedTrade, trades, saveTrades, sendTelegram, saveToSheets, formatTime, calculateHoldingTime }) {
+        function ExitForm({ selectedTrade, setSelectedTrade, trades, saveTrades, sendTelegram, saveToSheets, formatTime, calculateHoldingTime, accountBalance, updateBalance, commission, commissionMode, commissionType, entryCommission, exitCommission }) {
             const [exit, setExit] = useState({ exitPrice: '', exitReason: '', lessons: '' });
             const [loading, setLoading] = useState(false);
 
@@ -283,13 +532,50 @@
                 if (!exit.exitPrice) return alert('Enter exit price!');
                 setLoading(true);
                 const exitPrice = parseFloat(exit.exitPrice);
-                const pnl = selectedTrade.type === 'BUY' ? (exitPrice - selectedTrade.entry) * selectedTrade.quantity : (selectedTrade.entry - exitPrice) * selectedTrade.quantity;
+                const grossPnl = selectedTrade.type === 'BUY' ? (exitPrice - selectedTrade.entry) * selectedTrade.quantity : (selectedTrade.entry - exitPrice) * selectedTrade.quantity;
+                
+                // Calculate commission based on mode and type
+                let commissionCost = 0;
+                if (commissionType === 'combined') {
+                    if (commissionMode === 'percentage') {
+                        const entryCost = selectedTrade.entry * selectedTrade.quantity * commission / 100;
+                        const exitCost = exitPrice * selectedTrade.quantity * commission / 100;
+                        commissionCost = entryCost + exitCost;
+                    } else {
+                        commissionCost = commission * 2; // Fixed amount for entry + exit
+                    }
+                } else {
+                    if (commissionMode === 'percentage') {
+                        const entryCost = selectedTrade.entry * selectedTrade.quantity * entryCommission / 100;
+                        const exitCost = exitPrice * selectedTrade.quantity * exitCommission / 100;
+                        commissionCost = entryCost + exitCost;
+                    } else {
+                        commissionCost = entryCommission + exitCommission;
+                    }
+                }
+                
+                const netPnl = grossPnl - commissionCost;
                 const riskPer = Math.abs(selectedTrade.entry - selectedTrade.stoploss);
                 const rMultiple = selectedTrade.type === 'BUY' ? (exitPrice - selectedTrade.entry) / riskPer : (selectedTrade.entry - exitPrice) / riskPer;
                 const holdingTime = calculateHoldingTime(selectedTrade.entryTimestamp, Date.now());
-                const updated = { ...selectedTrade, status: 'CLOSED', exitPrice, exitTime: formatTime(), exitTimestamp: Date.now(), pnl, rMultiple, holdingTime, ...exit };
+                const newBalance = accountBalance + netPnl;
+                const updated = { 
+                    ...selectedTrade, 
+                    status: 'CLOSED', 
+                    exitPrice, 
+                    exitTime: formatTime(), 
+                    exitTimestamp: Date.now(), 
+                    grossPnl: grossPnl,
+                    commissionPaid: commissionCost,
+                    pnl: netPnl, 
+                    rMultiple, 
+                    holdingTime, 
+                    accountBalanceAtExit: newBalance,
+                    ...exit 
+                };
                 await saveToSheets(updated, 'updateTrade');
-                await sendTelegram(`${pnl >= 0 ? '🟢' : '🔴'} <b>TRADE EXIT</b>\n\n📊 ${updated.symbol} ${updated.type}\n💰 Entry: ₹${updated.entry}\n🚪 Exit: ₹${exitPrice}\n\n💸 P&L: ₹${pnl.toFixed(2)}\n📊 R: ${rMultiple.toFixed(2)}R\n⏱️ ${holdingTime}\n\n${exit.exitReason}`);
+                await sendTelegram(`${netPnl >= 0 ? '🟢' : '🔴'} TRADE EXIT\n\n📊 ${updated.symbol} ${updated.type}\n💰 Entry: ₹${updated.entry}\n🚪 Exit: ₹${exitPrice}\n\n💸 Gross P&L: ₹${grossPnl.toFixed(2)}\n💳 Commission: ₹${commissionCost.toFixed(2)}\n💰 Net P&L: ₹${netPnl.toFixed(2)}\n📊 R: ${rMultiple.toFixed(2)}R\n⏱️ ${holdingTime}\n💼 New Balance: ₹${newBalance.toFixed(0)}\n\n${exit.exitReason}`);
+                updateBalance(newBalance);
                 saveTrades(trades.map(t => t.id === selectedTrade.id ? updated : t));
                 setLoading(false);
                 setSelectedTrade(null);
@@ -298,14 +584,17 @@
 
             return (
                 <form onSubmit={handleExit} className="bg-white/10 backdrop-blur-lg rounded-2xl p-6 space-y-4">
-                    <h2 className="text-xl font-bold text-white">Exit: {selectedTrade.symbol}</h2>
+                    <div className="flex items-center justify-between mb-4">
+                        <h2 className="text-xl font-bold text-white">Exit: {selectedTrade.symbol}</h2>
+                        <button type="button" onClick={() => setSelectedTrade(null)} className="text-white/70 hover:text-white text-2xl">←</button>
+                    </div>
                     <input type="number" step="0.01" placeholder="Exit Price" value={exit.exitPrice} onChange={(e) => setExit({ ...exit, exitPrice: e.target.value })} className="w-full p-3 rounded-lg bg-white/20 text-white placeholder-white/50 border border-white/20" />
                     <select value={exit.exitReason} onChange={(e) => setExit({ ...exit, exitReason: e.target.value })} className="w-full p-3 rounded-lg bg-white/20 text-white border border-white/20">
-                        <option value="">Exit Reason</option>
-                        <option value="Target Hit">🎯 Target Hit</option>
-                        <option value="Stop Loss">🛑 Stop Loss</option>
-                        <option value="Time Exit">⏰ Time Exit</option>
-                        <option value="Manual">✋ Manual</option>
+                        <option value="" className="bg-gray-800">Exit Reason</option>
+                        <option value="Target Hit" className="bg-gray-800">🎯 Target Hit</option>
+                        <option value="Stop Loss" className="bg-gray-800">🛑 Stop Loss</option>
+                        <option value="Time Exit" className="bg-gray-800">⏰ Time Exit</option>
+                        <option value="Manual" className="bg-gray-800">✋ Manual</option>
                     </select>
                     <textarea placeholder="Lessons" value={exit.lessons} onChange={(e) => setExit({ ...exit, lessons: e.target.value })} rows="2" className="w-full p-3 rounded-lg bg-white/20 text-white placeholder-white/50 border border-white/20" />
                     <div className="flex gap-2">
@@ -316,28 +605,236 @@
             );
         }
 
-        function Analytics({ trades }) {
-            const closed = trades.filter(t => t.status === 'CLOSED');
-            if (closed.length === 0) return <div className="bg-white/10 backdrop-blur-lg rounded-2xl p-6"><h2 className="text-xl font-bold text-white mb-4">📈 Analytics</h2><p className="text-white/60 text-center py-8">No closed trades yet</p></div>;
-            const totalPnl = closed.reduce((s, t) => s + (t.pnl || 0), 0);
-            const winners = closed.filter(t => t.pnl > 0);
-            const losers = closed.filter(t => t.pnl < 0);
+        function Analytics({ trades, accountBalance, updateBalance, commission, updateCommission, commissionMode, updateCommissionMode, commissionType, updateCommissionType, entryCommission, updateEntryCommission, exitCommission, updateExitCommission, saveTrades, filters, setFilters }) {
+            const filteredTrades = trades.filter(t => {
+                if (t.status !== 'CLOSED') return false;
+                if (filters.search && !t.symbol.toLowerCase().includes(filters.search.toLowerCase())) return false;
+                if (filters.strategy && t.strategy !== filters.strategy) return false;
+                if (filters.result === 'win' && t.pnl <= 0) return false;
+                if (filters.result === 'loss' && t.pnl >= 0) return false;
+                if (filters.dateFrom && new Date(t.entryTime) < new Date(filters.dateFrom)) return false;
+                if (filters.dateTo && new Date(t.entryTime) > new Date(filters.dateTo)) return false;
+                return true;
+            });
+            
+            const resetAnalytics = () => {
+                if (confirm('⚠️ This will delete all closed trades. Open trades will remain. Continue?')) {
+                    const openTrades = trades.filter(t => t.status === 'OPEN');
+                    saveTrades(openTrades);
+                    alert('✅ Analytics reset! Only open trades remain.');
+                }
+            };
+            
+            const clearFilters = () => {
+                setFilters({ search: '', strategy: '', result: '', dateFrom: '', dateTo: '' });
+            };
+
+            if (filteredTrades.length === 0) return (
+                <div className="bg-white/10 backdrop-blur-lg rounded-2xl p-6">
+                    <div className="flex justify-between items-center mb-4">
+                        <h2 className="text-xl font-bold text-white">📈 Analytics</h2>
+                        <button onClick={resetAnalytics} className="bg-red-500 hover:bg-red-600 text-white px-4 py-2 rounded-lg text-sm font-semibold">🗑️ Reset</button>
+                    </div>
+                    
+                    <div className="space-y-3 mb-6">
+                        <input type="text" placeholder="🔍 Search symbol..." value={filters.search} onChange={(e) => setFilters({ ...filters, search: e.target.value })} className="w-full p-3 rounded-lg bg-white/20 text-white placeholder-white/50 border border-white/20" />
+                        <div className="grid grid-cols-2 gap-3">
+                            <select value={filters.strategy} onChange={(e) => setFilters({ ...filters, strategy: e.target.value })} className="p-3 rounded-lg bg-white/20 text-white border border-white/20">
+                                <option value="" className="bg-gray-800">All Strategies</option>
+                                <option value="ORB" className="bg-gray-800">ORB</option>
+                                <option value="Breakout" className="bg-gray-800">Breakout</option>
+                                <option value="EMA" className="bg-gray-800">EMA</option>
+                                <option value="VWAP" className="bg-gray-800">VWAP</option>
+                            </select>
+                            <select value={filters.result} onChange={(e) => setFilters({ ...filters, result: e.target.value })} className="p-3 rounded-lg bg-white/20 text-white border border-white/20">
+                                <option value="" className="bg-gray-800">All Results</option>
+                                <option value="win" className="bg-gray-800">Winners</option>
+                                <option value="loss" className="bg-gray-800">Losers</option>
+                            </select>
+                        </div>
+                        <div className="grid grid-cols-2 gap-3">
+                            <input type="date" value={filters.dateFrom} onChange={(e) => setFilters({ ...filters, dateFrom: e.target.value })} className="p-3 rounded-lg bg-white/20 text-white border border-white/20" />
+                            <input type="date" value={filters.dateTo} onChange={(e) => setFilters({ ...filters, dateTo: e.target.value })} className="p-3 rounded-lg bg-white/20 text-white border border-white/20" />
+                        </div>
+                        {(filters.search || filters.strategy || filters.result || filters.dateFrom || filters.dateTo) && (
+                            <button onClick={clearFilters} className="w-full bg-white/20 text-white py-2 rounded-lg text-sm">Clear Filters</button>
+                        )}
+                    </div>
+                    
+                    <p className="text-white/60 text-center py-8">No trades match your filters</p>
+                    <div className="mt-6 space-y-3">
+                        <div className="bg-white/10 rounded-lg p-4">
+                            <label className="text-white/70 text-sm block mb-2">Account Balance</label>
+                            <input type="number" value={accountBalance} onChange={(e) => updateBalance(parseFloat(e.target.value))} className="w-full p-3 rounded-lg bg-white/20 text-white border border-white/20" />
+                        </div>
+                        
+                        <div className="bg-white/10 rounded-lg p-4 space-y-3">
+                            <label className="text-white font-semibold block">Commission Settings</label>
+                            
+                            <div>
+                                <label className="text-white/70 text-sm block mb-2">Mode</label>
+                                <select value={commissionMode} onChange={(e) => updateCommissionMode(e.target.value)} className="w-full p-3 rounded-lg bg-white/20 text-white border border-white/20">
+                                    <option value="percentage" className="bg-gray-800">Percentage (%)</option>
+                                    <option value="fixed" className="bg-gray-800">Fixed Amount (₹)</option>
+                                </select>
+                            </div>
+                            
+                            <div>
+                                <label className="text-white/70 text-sm block mb-2">Type</label>
+                                <select value={commissionType} onChange={(e) => updateCommissionType(e.target.value)} className="w-full p-3 rounded-lg bg-white/20 text-white border border-white/20">
+                                    <option value="combined" className="bg-gray-800">Combined (Same for Entry & Exit)</option>
+                                    <option value="separate" className="bg-gray-800">Separate (Different rates)</option>
+                                </select>
+                            </div>
+                            
+                            {commissionType === 'combined' ? (
+                                <div>
+                                    <label className="text-white/70 text-sm block mb-2">
+                                        Commission {commissionMode === 'percentage' ? '(%)' : '(₹ per side)'}
+                                    </label>
+                                    <input type="number" step="0.01" value={commission} onChange={(e) => updateCommission(parseFloat(e.target.value))} className="w-full p-3 rounded-lg bg-white/20 text-white border border-white/20" />
+                                    <p className="text-white/50 text-xs mt-1">
+                                        {commissionMode === 'percentage' ? 'Applied to trade value' : 'Fixed per side (entry/exit)'}
+                                    </p>
+                                </div>
+                            ) : (
+                                <>
+                                    <div>
+                                        <label className="text-white/70 text-sm block mb-2">
+                                            Entry Commission {commissionMode === 'percentage' ? '(%)' : '(₹)'}
+                                        </label>
+                                        <input type="number" step="0.01" value={entryCommission} onChange={(e) => updateEntryCommission(parseFloat(e.target.value))} className="w-full p-3 rounded-lg bg-white/20 text-white border border-white/20" />
+                                    </div>
+                                    <div>
+                                        <label className="text-white/70 text-sm block mb-2">
+                                            Exit Commission {commissionMode === 'percentage' ? '(%)' : '(₹)'}
+                                        </label>
+                                        <input type="number" step="0.01" value={exitCommission} onChange={(e) => updateExitCommission(parseFloat(e.target.value))} className="w-full p-3 rounded-lg bg-white/20 text-white border border-white/20" />
+                                    </div>
+                                </>
+                            )}
+                        </div>
+                    </div>
+                </div>
+            );
+            
+            const totalPnl = filteredTrades.reduce((s, t) => s + (t.pnl || 0), 0);
+            const totalCommission = filteredTrades.reduce((s, t) => s + (t.commissionPaid || 0), 0);
+            const winners = filteredTrades.filter(t => t.pnl > 0);
+            const losers = filteredTrades.filter(t => t.pnl < 0);
             const avgWin = winners.length ? winners.reduce((s, t) => s + t.pnl, 0) / winners.length : 0;
             const avgLoss = losers.length ? Math.abs(losers.reduce((s, t) => s + t.pnl, 0) / losers.length) : 0;
+            const startBalance = filteredTrades[0]?.accountBalanceAtEntry || accountBalance;
+            const totalReturn = ((accountBalance - startBalance) / startBalance) * 100;
+            
             return (
                 <div className="bg-white/10 backdrop-blur-lg rounded-2xl p-6 space-y-4">
-                    <h2 className="text-xl font-bold text-white">📈 Analytics</h2>
+                    <div className="flex justify-between items-center">
+                        <h2 className="text-xl font-bold text-white">📈 Analytics</h2>
+                        <button onClick={resetAnalytics} className="bg-red-500 hover:bg-red-600 text-white px-3 py-2 rounded-lg text-sm font-semibold">🗑️ Reset</button>
+                    </div>
+                    
+                    <div className="space-y-3">
+                        <input type="text" placeholder="🔍 Search symbol..." value={filters.search} onChange={(e) => setFilters({ ...filters, search: e.target.value })} className="w-full p-3 rounded-lg bg-white/20 text-white placeholder-white/50 border border-white/20" />
+                        <div className="grid grid-cols-2 gap-3">
+                            <select value={filters.strategy} onChange={(e) => setFilters({ ...filters, strategy: e.target.value })} className="p-3 rounded-lg bg-white/20 text-white border border-white/20">
+                                <option value="" className="bg-gray-800">All Strategies</option>
+                                <option value="ORB" className="bg-gray-800">ORB</option>
+                                <option value="Breakout" className="bg-gray-800">Breakout</option>
+                                <option value="EMA" className="bg-gray-800">EMA</option>
+                                <option value="VWAP" className="bg-gray-800">VWAP</option>
+                            </select>
+                            <select value={filters.result} onChange={(e) => setFilters({ ...filters, result: e.target.value })} className="p-3 rounded-lg bg-white/20 text-white border border-white/20">
+                                <option value="" className="bg-gray-800">All Results</option>
+                                <option value="win" className="bg-gray-800">Winners</option>
+                                <option value="loss" className="bg-gray-800">Losers</option>
+                            </select>
+                        </div>
+                        <div className="grid grid-cols-2 gap-3">
+                            <input type="date" value={filters.dateFrom} onChange={(e) => setFilters({ ...filters, dateFrom: e.target.value })} className="p-3 rounded-lg bg-white/20 text-white border border-white/20" />
+                            <input type="date" value={filters.dateTo} onChange={(e) => setFilters({ ...filters, dateTo: e.target.value })} className="p-3 rounded-lg bg-white/20 text-white border border-white/20" />
+                        </div>
+                        {(filters.search || filters.strategy || filters.result || filters.dateFrom || filters.dateTo) && (
+                            <button onClick={clearFilters} className="w-full bg-white/20 text-white py-2 rounded-lg text-sm">Clear Filters</button>
+                        )}
+                    </div>
+                    
+                    <div className="bg-gradient-to-r from-green-500/20 to-blue-500/20 rounded-xl p-4 border border-green-400/30">
+                        <div className="text-white/70 text-sm">Showing {filteredTrades.length} trades</div>
+                        <div className={`text-3xl font-bold ${totalReturn >= 0 ? 'text-green-300' : 'text-red-300'}`}>{totalReturn.toFixed(2)}%</div>
+                    </div>
+
                     <div className="grid grid-cols-2 gap-4">
-                        <MetricCard label="Expectancy" value={`₹${(totalPnl / closed.length).toFixed(2)}`} color="text-white" />
+                        <MetricCard label="Expectancy" value={`₹${(totalPnl / filteredTrades.length).toFixed(2)}`} color="text-white" />
+                        <MetricCard label="Total Commission" value={`₹${totalCommission.toFixed(0)}`} color="text-orange-300" />
                         <MetricCard label="Avg Win" value={`₹${avgWin.toFixed(0)}`} color="text-green-300" />
                         <MetricCard label="Avg Loss" value={`₹${avgLoss.toFixed(0)}`} color="text-red-300" />
-                        <MetricCard label="Total P&L" value={`₹${totalPnl.toFixed(0)}`} color={totalPnl >= 0 ? 'text-green-300' : 'text-red-300'} />
+                        <MetricCard label="Gross P&L" value={`₹${(totalPnl + totalCommission).toFixed(0)}`} color="text-blue-300" />
+                        <MetricCard label="Net P&L" value={`₹${totalPnl.toFixed(0)}`} color={totalPnl >= 0 ? 'text-green-300' : 'text-red-300'} />
                     </div>
+
+                    <div className="space-y-3">
+                        <div className="bg-white/10 rounded-lg p-4">
+                            <label className="text-white/70 text-sm block mb-2">Account Balance</label>
+                            <input type="number" value={accountBalance} onChange={(e) => updateBalance(parseFloat(e.target.value))} className="w-full p-3 rounded-lg bg-white/20 text-white border border-white/20" />
+                        </div>
+                        
+                        <div className="bg-white/10 rounded-lg p-4 space-y-3">
+                            <label className="text-white font-semibold block">Commission Settings</label>
+                            
+                            <div>
+                                <label className="text-white/70 text-sm block mb-2">Mode</label>
+                                <select value={commissionMode} onChange={(e) => updateCommissionMode(e.target.value)} className="w-full p-3 rounded-lg bg-white/20 text-white border border-white/20">
+                                    <option value="percentage" className="bg-gray-800">Percentage (%)</option>
+                                    <option value="fixed" className="bg-gray-800">Fixed Amount (₹)</option>
+                                </select>
+                            </div>
+                            
+                            <div>
+                                <label className="text-white/70 text-sm block mb-2">Type</label>
+                                <select value={commissionType} onChange={(e) => updateCommissionType(e.target.value)} className="w-full p-3 rounded-lg bg-white/20 text-white border border-white/20">
+                                    <option value="combined" className="bg-gray-800">Combined (Same for Entry & Exit)</option>
+                                    <option value="separate" className="bg-gray-800">Separate (Different rates)</option>
+                                </select>
+                            </div>
+                            
+                            {commissionType === 'combined' ? (
+                                <div>
+                                    <label className="text-white/70 text-sm block mb-2">
+                                        Commission {commissionMode === 'percentage' ? '(%)' : '(₹ per side)'}
+                                    </label>
+                                    <input type="number" step="0.01" value={commission} onChange={(e) => updateCommission(parseFloat(e.target.value))} className="w-full p-3 rounded-lg bg-white/20 text-white border border-white/20" />
+                                    <p className="text-white/50 text-xs mt-1">
+                                        {commissionMode === 'percentage' ? 'Applied to trade value' : 'Fixed per side (entry/exit)'}
+                                    </p>
+                                </div>
+                            ) : (
+                                <>
+                                    <div>
+                                        <label className="text-white/70 text-sm block mb-2">
+                                            Entry Commission {commissionMode === 'percentage' ? '(%)' : '(₹)'}
+                                        </label>
+                                        <input type="number" step="0.01" value={entryCommission} onChange={(e) => updateEntryCommission(parseFloat(e.target.value))} className="w-full p-3 rounded-lg bg-white/20 text-white border border-white/20" />
+                                    </div>
+                                    <div>
+                                        <label className="text-white/70 text-sm block mb-2">
+                                            Exit Commission {commissionMode === 'percentage' ? '(%)' : '(₹)'}
+                                        </label>
+                                        <input type="number" step="0.01" value={exitCommission} onChange={(e) => updateExitCommission(parseFloat(e.target.value))} className="w-full p-3 rounded-lg bg-white/20 text-white border border-white/20" />
+                                    </div>
+                                </>
+                            )}
+                        </div>
+                    </div>
+                    
                     <div className="bg-white/5 rounded-lg p-4">
-                        <h3 className="text-white font-semibold mb-3">Recent Trades</h3>
-                        {closed.slice(-5).reverse().map(t => (
+                        <h3 className="text-white font-semibold mb-3">Filtered Trades</h3>
+                        {filteredTrades.slice(-10).reverse().map(t => (
                             <div key={t.id} className="flex justify-between p-2 bg-white/5 rounded mb-2">
-                                <span className="text-white">{t.symbol}</span>
+                                <div>
+                                    <span className="text-white">{t.symbol}</span>
+                                    <span className="text-white/50 text-xs ml-2">{t.strategy}</span>
+                                </div>
                                 <span className={t.pnl >= 0 ? 'text-green-300' : 'text-red-300'}>₹{t.pnl.toFixed(0)}</span>
                             </div>
                         ))}
@@ -347,147 +844,358 @@
         }
 
         function Summary({ trades, sendTelegram }) {
-            const today = new Date().toDateString();
-            const todayTrades = trades.filter(t => new Date(t.entryTime).toDateString() === today);
-            const todayPnl = todayTrades.filter(t => t.status === 'CLOSED').reduce((s, t) => s + (t.pnl || 0), 0);
-
-            const sendDailySummary = async () => {
-                const closed = todayTrades.filter(t => t.status === 'CLOSED');
-                const open = todayTrades.filter(t => t.status === 'OPEN');
-                const winners = closed.filter(t => t.pnl > 0).length;
-                const losers = closed.filter(t => t.pnl < 0).length;
-                const winRate = closed.length > 0 ? ((winners / closed.length) * 100).toFixed(1) : '0';
-                
-                const message = `📊 <b>DAILY SUMMARY</b>
-📅 ${new Date().toLocaleDateString('en-IN')}
-
-📈 Total Trades: ${todayTrades.length}
-✅ Closed: ${closed.length}
-⏳ Open: ${open.length}
-
-${closed.length > 0 ? `🎯 Winners: ${winners}
-❌ Losers: ${losers}
-📊 Win Rate: ${winRate}%
-
-💰 <b>Net P&L: ₹${todayPnl.toFixed(2)}</b>` : 'No closed trades today.'}`;
-
-                await sendTelegram(message);
-                alert('✅ Daily summary sent to Telegram!');
-            };
-
-            const sendMonthlySummary = async () => {
+            const [summaryType, setSummaryType] = useState('daily');
+            
+            const getFilteredTrades = () => {
                 const now = new Date();
-                const monthTrades = trades.filter(t => {
-                    const d = new Date(t.entryTime);
-                    return d.getMonth() === now.getMonth() && d.getFullYear() === now.getFullYear();
-                });
+                const today = now.toDateString();
                 
-                const closed = monthTrades.filter(t => t.status === 'CLOSED');
-                const open = monthTrades.filter(t => t.status === 'OPEN');
+                if (summaryType === 'daily') {
+                    return trades.filter(t => new Date(t.entryTime).toDateString() === today);
+                }
+                
+                if (summaryType === 'weekly') {
+                    const weekAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+                    return trades.filter(t => new Date(t.entryTime) >= weekAgo);
+                }
+                
+                if (summaryType === 'monthly') {
+                    const monthAgo = new Date(now.getFullYear(), now.getMonth(), 1);
+                    return trades.filter(t => new Date(t.entryTime) >= monthAgo);
+                }
+                
+                return trades;
+            };
+            
+            const generateSummaryMessage = (filteredTrades) => {
+                const closed = filteredTrades.filter(t => t.status === 'CLOSED');
+                const open = filteredTrades.filter(t => t.status === 'OPEN');
+                
+                const now = new Date();
+                const monthName = now.toLocaleString('default', { month: 'long', year: 'numeric' });
+                
+                let message = `📅 ${summaryType.toUpperCase()} SUMMARY - ${monthName}\n\n`;
+                
+                message += `📊 OVERVIEW\n`;
+                message += `📈 Total Trades: ${filteredTrades.length}\n`;
+                message += `✅ Closed: ${closed.length}\n`;
+                message += `⏳ Open: ${open.length}\n\n`;
+                
+                if (closed.length === 0) {
+                    if (open.length > 0) {
+                        message += `⏳ OPEN POSITIONS (${open.length})\n`;
+                        open.forEach(t => {
+                            message += `• ${t.symbol} ${t.type} @ ₹${t.entry}\n`;
+                        });
+                    } else {
+                        message += `No trades found for this period.`;
+                    }
+                    return message;
+                }
+                
                 const totalPnl = closed.reduce((s, t) => s + (t.pnl || 0), 0);
+                const totalCommission = closed.reduce((s, t) => s + (t.commissionPaid || 0), 0);
                 const winners = closed.filter(t => t.pnl > 0);
                 const losers = closed.filter(t => t.pnl < 0);
-                const winRate = closed.length > 0 ? ((winners.length / closed.length) * 100).toFixed(1) : '0';
+                const winRate = ((winners.length / closed.length) * 100).toFixed(1);
+                const loseRate = ((losers.length / closed.length) * 100).toFixed(1);
                 
-                const avgPnl = closed.length > 0 ? (totalPnl / closed.length).toFixed(2) : '0';
-                const avgR = closed.length > 0 ? (closed.reduce((s, t) => s + (t.rMultiple || 0), 0) / closed.length).toFixed(2) : '0.00';
+                message += `🎯 PERFORMANCE\n`;
+                message += `Winners: ${winners.length} (${winRate}%)\n`;
+                message += `Losers: ${losers.length} (${loseRate}%)\n\n`;
                 
+                const avgPnl = totalPnl / closed.length;
+                const avgR = closed.reduce((s, t) => s + (t.rMultiple || 0), 0) / closed.length;
                 const grossWin = winners.reduce((s, t) => s + t.pnl, 0);
                 const grossLoss = Math.abs(losers.reduce((s, t) => s + t.pnl, 0));
-                const profitFactor = grossLoss > 0 ? (grossWin / grossLoss).toFixed(2) : closed.length > 0 ? '∞' : '0';
+                const profitFactor = grossLoss > 0 ? (grossWin / grossLoss).toFixed(2) : '∞';
                 
-                const sortedTrades = [...closed].sort((a, b) => b.pnl - a.pnl);
-                const bestTrade = sortedTrades[0];
-                const worstTrade = sortedTrades[sortedTrades.length - 1];
+                message += `💰 P&L STATS\n`;
+                message += `Net P&L: ${totalPnl >= 0 ? '+' : ''}₹${totalPnl.toFixed(2)}\n`;
+                message += `Avg P&L: ${avgPnl >= 0 ? '+' : ''}₹${avgPnl.toFixed(2)}\n`;
+                message += `Avg R-Multiple: ${avgR.toFixed(2)}R\n`;
+                message += `Profit Factor: ${profitFactor}\n\n`;
                 
-                const monthName = now.toLocaleDateString('en-IN', { month: 'long', year: 'numeric' });
+                const bestTrade = closed.reduce((max, t) => t.pnl > max.pnl ? t : max, closed[0]);
+                const worstTrade = closed.reduce((min, t) => t.pnl < min.pnl ? t : min, closed[0]);
+                
+                message += `🏆 Best Trade: ${bestTrade.symbol} (${bestTrade.pnl >= 0 ? '+' : ''}₹${bestTrade.pnl.toFixed(2)}, ${bestTrade.rMultiple?.toFixed(2)}R)\n`;
+                message += `📉 Worst Trade: ${worstTrade.symbol} (₹${worstTrade.pnl.toFixed(2)}, ${worstTrade.rMultiple?.toFixed(2)}R)\n\n`;
                 
                 const strategies = {};
                 closed.forEach(t => {
-                    const strat = t.strategy || 'Not specified';
-                    if (!strategies[strat]) strategies[strat] = { count: 0, wins: 0, pnl: 0 };
-                    strategies[strat].count++;
-                    if (t.pnl > 0) strategies[strat].wins++;
-                    strategies[strat].pnl += t.pnl;
+                    if (t.strategy) {
+                        if (!strategies[t.strategy]) {
+                            strategies[t.strategy] = { count: 0, wins: 0, pnl: 0 };
+                        }
+                        strategies[t.strategy].count++;
+                        if (t.pnl > 0) strategies[t.strategy].wins++;
+                        strategies[t.strategy].pnl += t.pnl;
+                    }
                 });
                 
-                let strategyText = '';
-                Object.entries(strategies).forEach(([name, data]) => {
-                    const stratWinRate = ((data.wins / data.count) * 100).toFixed(0);
-                    strategyText += `\n${name}: ${data.count} trades, ${stratWinRate}% WR, ${data.pnl >= 0 ? '+' : ''}₹${data.pnl.toFixed(0)}`;
-                });
+                if (Object.keys(strategies).length > 0) {
+                    message += `📊 BY STRATEGY\n`;
+                    Object.entries(strategies).forEach(([strategy, stats]) => {
+                        const wr = ((stats.wins / stats.count) * 100).toFixed(0);
+                        message += `${strategy}: ${stats.count} trades, ${wr}% WR, ${stats.pnl >= 0 ? '+' : ''}₹${stats.pnl.toFixed(0)}\n`;
+                    });
+                    message += `\n`;
+                }
                 
-                const message = `📅 <b>MONTHLY SUMMARY - ${monthName}</b>
-
-📊 <b>OVERVIEW</b>
-📈 Total Trades: ${monthTrades.length}
-✅ Closed: ${closed.length}
-⏳ Open: ${open.length}
-
-${closed.length > 0 ? `🎯 <b>PERFORMANCE</b>
-Winners: ${winners.length} (${winRate}%)
-Losers: ${losers.length} (${((losers.length/closed.length)*100).toFixed(1)}%)
-
-💰 <b>P&L STATS</b>
-Net P&L: ${totalPnl >= 0 ? '+' : ''}₹${totalPnl.toFixed(2)}
-Avg P&L: ${avgPnl >= 0 ? '+' : ''}₹${avgPnl}
-Avg R-Multiple: ${avgR}R
-Profit Factor: ${profitFactor}
-
-${bestTrade ? `🏆 Best Trade: ${bestTrade.symbol} (+₹${bestTrade.pnl.toFixed(2)}, ${bestTrade.rMultiple.toFixed(2)}R)` : ''}
-${worstTrade ? `\n📉 Worst Trade: ${worstTrade.symbol} (₹${worstTrade.pnl.toFixed(2)}, ${worstTrade.rMultiple.toFixed(2)}R)` : ''}
-
-${strategyText ? `\n📊 <b>BY STRATEGY</b>${strategyText}` : ''}` : 'No closed trades this month.'}
-
-${open.length > 0 ? `\n\n<b>⏳ OPEN POSITIONS (${open.length})</b>${open.map(t => `\n• ${t.symbol} ${t.type} @ ₹${t.entry}`).join('')}` : ''}`;
-
-                await sendTelegram(message);
-                alert('✅ Monthly summary sent to Telegram!');
+                if (open.length > 0) {
+                    message += `⏳ OPEN POSITIONS (${open.length})\n`;
+                    open.forEach(t => {
+                        message += `• ${t.symbol} ${t.type} @ ₹${t.entry}\n`;
+                    });
+                }
+                
+                return message;
             };
-
+            
+            const sendSummary = async () => {
+                const filteredTrades = getFilteredTrades();
+                const message = generateSummaryMessage(filteredTrades);
+                await sendTelegram(message);
+                alert('✅ Summary sent to Telegram!');
+            };
+            
+            const filteredTrades = getFilteredTrades();
+            const closed = filteredTrades.filter(t => t.status === 'CLOSED');
+            const totalPnl = closed.reduce((s, t) => s + (t.pnl || 0), 0);
+            const winners = closed.filter(t => t.pnl > 0);
+            const winRate = closed.length > 0 ? ((winners.length / closed.length) * 100).toFixed(1) : '0';
+            
             return (
                 <div className="bg-white/10 backdrop-blur-lg rounded-2xl p-6 space-y-4">
                     <h2 className="text-xl font-bold text-white">📊 Summary</h2>
                     
-                    <div className="grid grid-cols-2 gap-4">
-                        <MetricCard label="Today Trades" value={todayTrades.length} color="text-white" />
-                        <MetricCard label="Today P&L" value={`₹${todayPnl.toFixed(0)}`} color={todayPnl >= 0 ? 'text-green-300' : 'text-red-300'} />
+                    <div className="flex gap-2">
+                        <button 
+                            onClick={() => setSummaryType('daily')} 
+                            className={`flex-1 py-2 rounded-lg font-semibold ${summaryType === 'daily' ? 'bg-purple-500 text-white' : 'bg-white/10 text-white/70'}`}>
+                            Daily
+                        </button>
+                        <button 
+                            onClick={() => setSummaryType('weekly')} 
+                            className={`flex-1 py-2 rounded-lg font-semibold ${summaryType === 'weekly' ? 'bg-purple-500 text-white' : 'bg-white/10 text-white/70'}`}>
+                            Weekly
+                        </button>
+                        <button 
+                            onClick={() => setSummaryType('monthly')} 
+                            className={`flex-1 py-2 rounded-lg font-semibold ${summaryType === 'monthly' ? 'bg-purple-500 text-white' : 'bg-white/10 text-white/70'}`}>
+                            Monthly
+                        </button>
                     </div>
-
-                    <button onClick={sendDailySummary} className="w-full bg-purple-500 hover:bg-purple-600 text-white font-bold py-3 rounded-lg transition-colors">
-                        📊 Send Daily Summary
+                    
+                    <div className="bg-white/5 rounded-lg p-4 space-y-3">
+                        <h3 className="text-white font-semibold text-lg capitalize">{summaryType} Overview</h3>
+                        <div className="grid grid-cols-2 gap-3">
+                            <div className="bg-white/10 rounded-lg p-3">
+                                <div className="text-white/60 text-xs">Total Trades</div>
+                                <div className="text-white text-xl font-bold">{closed.length}</div>
+                            </div>
+                            <div className="bg-white/10 rounded-lg p-3">
+                                <div className="text-white/60 text-xs">Win Rate</div>
+                                <div className="text-blue-300 text-xl font-bold">{winRate}%</div>
+                            </div>
+                            <div className="bg-white/10 rounded-lg p-3 col-span-2">
+                                <div className="text-white/60 text-xs">Net P&L</div>
+                                <div className={`text-2xl font-bold ${totalPnl >= 0 ? 'text-green-300' : 'text-red-300'}`}>
+                                    ₹{totalPnl.toFixed(2)}
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <button 
+                        onClick={sendSummary} 
+                        className="w-full bg-purple-500 hover:bg-purple-600 text-white font-bold py-3 rounded-lg">
+                        📤 Send {summaryType.charAt(0).toUpperCase() + summaryType.slice(1)} Summary
                     </button>
-
-                    <button onClick={sendMonthlySummary} className="w-full bg-indigo-500 hover:bg-indigo-600 text-white font-bold py-3 rounded-lg transition-colors">
-                        📅 Send Monthly Summary
-                    </button>
-
-                    <div className="pt-4">
-                        <h3 className="text-white font-semibold mb-3">Today's Trades</h3>
-                        {todayTrades.length === 0 ? (
-                            <p className="text-white/60 text-center py-8">No trades today</p>
+                    
+                    <div className="space-y-2">
+                        <h3 className="text-white font-semibold">Trade Details</h3>
+                        {filteredTrades.length === 0 ? (
+                            <p className="text-white/60 text-center py-4">No trades in this period</p>
                         ) : (
-                            <div className="space-y-2">
-                                {todayTrades.map(t => (
-                                    <div key={t.id} className="bg-white/10 rounded-lg p-3 flex justify-between items-center">
+                            filteredTrades.map(t => (
+                                <div key={t.id} className="bg-white/10 rounded-lg p-3">
+                                    <div className="flex justify-between items-center mb-2">
                                         <div>
                                             <div className="text-white font-semibold">{t.symbol}</div>
-                                            <div className="text-white/60 text-xs">{t.type} • {t.strategy}</div>
+                                            <div className="text-white/60 text-xs">{t.type} • {t.strategy || 'No strategy'}</div>
                                         </div>
-                                        <div className="text-right">
-                                            <div className={`text-xs px-2 py-1 rounded ${t.status === 'OPEN' ? 'bg-yellow-500/20 text-yellow-300' : 'bg-gray-500/20 text-gray-300'}`}>
-                                                {t.status}
-                                            </div>
-                                            {t.status === 'CLOSED' && (
-                                                <div className={`text-sm font-bold mt-1 ${t.pnl >= 0 ? 'text-green-300' : 'text-red-300'}`}>
-                                                    ₹{t.pnl.toFixed(0)}
-                                                </div>
-                                            )}
+                                        <div className={`text-xs px-2 py-1 rounded ${t.status === 'OPEN' ? 'bg-yellow-500/20 text-yellow-300' : 'bg-gray-500/20 text-gray-300'}`}>
+                                            {t.status}
                                         </div>
                                     </div>
-                                ))}
-                            </div>
+                                    <div className="grid grid-cols-2 gap-2 text-sm">
+                                        <div>
+                                            <span className="text-white/60">Entry: </span>
+                                            <span className="text-white">₹{t.entry}</span>
+                                        </div>
+                                        {t.exitPrice && (
+                                            <div>
+                                                <span className="text-white/60">Exit: </span>
+                                                <span className="text-white">₹{t.exitPrice}</span>
+                                            </div>
+                                        )}
+                                        {t.pnl !== 0 && (
+                                            <>
+                                                <div>
+                                                    <span className="text-white/60">P&L: </span>
+                                                    <span className={t.pnl >= 0 ? 'text-green-300' : 'text-red-300'}>
+                                                        ₹{t.pnl.toFixed(2)}
+                                                    </span>
+                                                </div>
+                                                <div>
+                                                    <span className="text-white/60">R: </span>
+                                                    <span className="text-purple-300">{t.rMultiple?.toFixed(2)}R</span>
+                                                </div>
+                                            </>
+                                        )}
+                                    </div>
+                                    <div className="text-white/50 text-xs mt-2">
+                                        {new Date(t.entryTime).toLocaleString()}
+                                    </div>
+                                </div>
+                            ))
                         )}
+                    </div>
+                </div>
+            );
+        }
+
+        function Reports({ trades, accountBalance, sendTelegram }) {
+            const [reportType, setReportType] = useState('monthly');
+            
+            const generateMonthlyReport = () => {
+                const now = new Date();
+                const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+                const monthTrades = trades.filter(t => new Date(t.entryTime) >= monthStart);
+                const closed = monthTrades.filter(t => t.status === 'CLOSED');
+                
+                if (closed.length === 0) return 'No closed trades this month';
+                
+                const totalPnl = closed.reduce((s, t) => s + (t.pnl || 0), 0);
+                const totalCommission = closed.reduce((s, t) => s + (t.commissionPaid || 0), 0);
+                const winners = closed.filter(t => t.pnl > 0);
+                const losers = closed.filter(t => t.pnl < 0);
+                const winRate = ((winners.length / closed.length) * 100).toFixed(1);
+                
+                const avgR = (closed.reduce((s, t) => s + (t.rMultiple || 0), 0) / closed.length).toFixed(2);
+                const grossWin = winners.reduce((s, t) => s + t.pnl, 0);
+                const grossLoss = Math.abs(losers.reduce((s, t) => s + t.pnl, 0));
+                const profitFactor = grossLoss > 0 ? (grossWin / grossLoss).toFixed(2) : '∞';
+                
+                const bestTrade = closed.reduce((max, t) => t.pnl > max.pnl ? t : max, closed[0]);
+                const worstTrade = closed.reduce((min, t) => t.pnl < min.pnl ? t : min, closed[0]);
+                
+                const strategies = {};
+                closed.forEach(t => {
+                    if (t.strategy) {
+                        if (!strategies[t.strategy]) {
+                            strategies[t.strategy] = { count: 0, wins: 0, pnl: 0 };
+                        }
+                        strategies[t.strategy].count++;
+                        if (t.pnl > 0) strategies[t.strategy].wins++;
+                        strategies[t.strategy].pnl += t.pnl;
+                    }
+                });
+                
+                let report = `📊 MONTHLY TRADING REPORT\n`;
+                report += `${now.toLocaleString('default', { month: 'long', year: 'numeric' })}\n\n`;
+                report += `════════════════════════\n`;
+                report += `📈 PERFORMANCE SUMMARY\n`;
+                report += `════════════════════════\n`;
+                report += `Total Trades: ${closed.length}\n`;
+                report += `Winners: ${winners.length} (${winRate}%)\n`;
+                report += `Losers: ${losers.length} (${(100 - parseFloat(winRate)).toFixed(1)}%)\n`;
+                report += `Win Rate: ${winRate}%\n`;
+                report += `Avg R-Multiple: ${avgR}R\n`;
+                report += `Profit Factor: ${profitFactor}\n\n`;
+                report += `💰 FINANCIAL BREAKDOWN\n`;
+                report += `════════════════════════\n`;
+                report += `Gross P&L: ₹${(totalPnl + totalCommission).toFixed(2)}\n`;
+                report += `Commission: ₹${totalCommission.toFixed(2)}\n`;
+                report += `Net P&L: ${totalPnl >= 0 ? '+' : ''}₹${totalPnl.toFixed(2)}\n`;
+                report += `Avg Win: ₹${(grossWin / winners.length || 0).toFixed(0)}\n`;
+                report += `Avg Loss: ₹${(grossLoss / losers.length || 0).toFixed(0)}\n`;
+                report += `Expectancy: ₹${(totalPnl / closed.length).toFixed(2)}\n\n`;
+                report += `🏆 TOP PERFORMERS\n`;
+                report += `════════════════════════\n`;
+                report += `Best: ${bestTrade.symbol} (+₹${bestTrade.pnl.toFixed(2)}, ${bestTrade.rMultiple?.toFixed(2)}R)\n`;
+                report += `Worst: ${worstTrade.symbol} (₹${worstTrade.pnl.toFixed(2)}, ${worstTrade.rMultiple?.toFixed(2)}R)\n\n`;
+                
+                if (Object.keys(strategies).length > 0) {
+                    report += `📊 STRATEGY BREAKDOWN\n`;
+                    report += `════════════════════════\n`;
+                    Object.entries(strategies).forEach(([strategy, stats]) => {
+                        const wr = ((stats.wins / stats.count) * 100).toFixed(0);
+                        report += `${strategy}:\n`;
+                        report += `  Trades: ${stats.count} | WR: ${wr}%\n`;
+                        report += `  P&L: ${stats.pnl >= 0 ? '+' : ''}₹${stats.pnl.toFixed(0)}\n\n`;
+                    });
+                }
+                
+                report += `💼 ACCOUNT STATUS\n`;
+                report += `════════════════════════\n`;
+                report += `Current Balance: ₹${accountBalance.toLocaleString('en-IN')}\n`;
+                report += `Return This Month: ${((totalPnl / accountBalance) * 100).toFixed(2)}%\n\n`;
+                report += `Generated: ${new Date().toLocaleString()}\n`;
+                
+                return report;
+            };
+            
+            const sendReport = async () => {
+                const report = generateMonthlyReport();
+                if (report === 'No closed trades this month') {
+                    alert('❌ No closed trades to report');
+                    return;
+                }
+                await sendTelegram(report);
+                alert('✅ Monthly report sent to Telegram!');
+            };
+            
+            const downloadReport = () => {
+                const report = generateMonthlyReport();
+                if (report === 'No closed trades this month') {
+                    alert('❌ No closed trades to report');
+                    return;
+                }
+                const blob = new Blob([report], { type: 'text/plain' });
+                const link = document.createElement('a');
+                link.href = URL.createObjectURL(blob);
+                link.download = `trading-report-${new Date().toISOString().split('T')[0]}.txt`;
+                link.click();
+                alert('✅ Report downloaded!');
+            };
+            
+            return (
+                <div className="bg-white/10 backdrop-blur-lg rounded-2xl p-6 space-y-4">
+                    <h2 className="text-xl font-bold text-white">📋 Monthly Reports</h2>
+                    
+                    <div className="bg-white/5 rounded-lg p-4">
+                        <h3 className="text-white font-semibold mb-3">Generate Report</h3>
+                        <p className="text-white/60 text-sm mb-4">
+                            Generate a comprehensive monthly trading report with all statistics, strategy breakdown, and performance analysis.
+                        </p>
+                        <div className="flex gap-3">
+                            <button onClick={sendReport} className="flex-1 bg-purple-500 hover:bg-purple-600 text-white font-bold py-3 rounded-lg">
+                                📤 Send to Telegram
+                            </button>
+                            <button onClick={downloadReport} className="flex-1 bg-blue-500 hover:bg-blue-600 text-white font-bold py-3 rounded-lg">
+                                📥 Download
+                            </button>
+                        </div>
+                    </div>
+                    
+                    <div className="bg-white/5 rounded-lg p-4">
+                        <h3 className="text-white font-semibold mb-3">Report Preview</h3>
+                        <pre className="text-white/80 text-xs whitespace-pre-wrap font-mono bg-black/30 p-4 rounded-lg max-h-96 overflow-y-auto">
+                            {generateMonthlyReport()}
+                        </pre>
                     </div>
                 </div>
             );
